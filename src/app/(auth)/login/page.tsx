@@ -139,7 +139,7 @@ export default function LoginPage() {
     <div className="relative flex min-h-screen flex-col items-center justify-center bg-ex-bg px-4 py-12">
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-ex-secondary/15 via-transparent to-transparent"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-ex-secondary/8 via-transparent to-transparent"
       />
       <Card className="relative z-10 w-full max-w-md border-ex-border shadow-lg dark:shadow-none">
         <CardHeader className="space-y-4 text-center">

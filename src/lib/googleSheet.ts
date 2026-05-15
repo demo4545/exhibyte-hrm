@@ -16,11 +16,11 @@ const auth = new google.auth.GoogleAuth({
 });
 
 export const getGoogleSheetsInstance = async () => {
-    const client = await auth.getClient();
+    const authClient = await auth.getClient();
 
     return google.sheets({
         version: "v4",
-        auth: client,
+        auth: authClient as any,
     });
 };
 
@@ -30,7 +30,7 @@ const spreadsheetId = process.env.GOOGLE_SHEET_ID as string;
  * Read data from sheet
  */
 export const readSheet = async (
-    range: string = "Sheet1!A1:Z1000"
+    range: string = "Sheet1"
 ) => {
     try {
         const sheets = await getGoogleSheetsInstance();

@@ -65,7 +65,7 @@ function NavGroup({
         className={cn(
           "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition",
           pathname === item.href
-            ? "bg-ex-primary text-ex-bg dark:bg-ex-secondary dark:text-white"
+            ? "bg-ex-secondary text-white shadow-sm"
             : "text-ex-muted hover:bg-ex-surface hover:text-ex-primary",
         )}
       >
@@ -105,7 +105,7 @@ function NavGroup({
                 className={cn(
                   "rounded-md px-2 py-1.5 text-sm transition",
                   childActive
-                    ? "bg-ex-secondary/15 font-medium text-ex-secondary"
+                    ? "bg-ex-secondary/12 font-medium text-ex-secondary"
                     : "text-ex-muted hover:bg-ex-surface hover:text-ex-primary",
                 )}
               >
@@ -139,7 +139,7 @@ export function MobileDrawer() {
         <div className="fixed inset-0 z-50 lg:hidden">
           <button
             type="button"
-            className="absolute inset-0 bg-ex-primary/40 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             aria-label="Close menu backdrop"
             onClick={() => setOpen(false)}
           />

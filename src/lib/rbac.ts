@@ -1,11 +1,17 @@
 import type { UserRole } from "@/types/auth";
 
+export type NavChild = {
+  label: string;
+  href: string;
+  roles: UserRole[];
+};
+
 export type NavItem = {
   label: string;
   href: string;
   icon: string;
   roles: UserRole[];
-  children?: { label: string; href: string }[];
+  children?: NavChild[];
 };
 
 export const navStructure: NavItem[] = [
@@ -21,7 +27,16 @@ export const navStructure: NavItem[] = [
     icon: "Users",
     roles: ["super_admin", "hr", "employee"],
     children: [
-      { label: "All Employees", href: "/employee" },
+      {
+        label: "All Employees",
+        href: "/employee",
+        roles: ["super_admin", "hr", "employee"],
+      },
+      // {
+      //   label: "Employee Roles",
+      //   href: "/employee/roles",
+      //   roles: ["super_admin", "hr"],
+      // },
       // { label: "Onboarding / offboarding", href: "/employee/onboarding" },
       // { label: "Profile & documents", href: "/employee/profile" },
       // { label: "Punch in / out", href: "/employee/punch" },
@@ -79,13 +94,49 @@ export const navStructure: NavItem[] = [
   // },
 ];
 
+function filterNavChildren(
+  children: NavChild[] | undefined,
+  role: UserRole,
+): NavChild[] | undefined {
+  if (!children?.length) return undefined;
+  const filtered = children.filter((child) => child.roles.includes(role));
+  return filtered.length ? filtered : undefined;
+}
+
 export function filterNav(role: UserRole | null): NavItem[] {
   if (!role) return [];
-  return navStructure.filter((item) => item.roles.includes(role));
+
+  return navStructure
+    .filter((item) => item.roles.includes(role))
+    .map((item) => ({
+      ...item,
+      children: filterNavChildren(item.children, role),
+    }))
+    .filter((item) => !item.children || item.children.length > 0);
 }
 
 export function canAccessPath(role: UserRole, pathname: string): boolean {
   if (role === "super_admin") return true;
+
+  for (const item of navStructure) {
+    if (!item.roles.includes(role)) continue;
+
+    if (item.children?.length) {
+      for (const child of item.children) {
+        if (
+          pathname === child.href ||
+          pathname.startsWith(`${child.href}/`)
+        ) {
+          return child.roles.includes(role);
+        }
+      }
+    }
+
+    if (pathname === item.href || pathname.startsWith(`${item.href}/`)) {
+      return item.roles.includes(role);
+    }
+  }
+
   if (pathname.startsWith("/settings/network")) return false;
   if (pathname.startsWith("/integrations") && role === "employee") return false;
   return true;

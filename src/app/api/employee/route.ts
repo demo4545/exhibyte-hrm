@@ -7,6 +7,10 @@ import {
     updateSheetRow,
     clearSheetRange,
 } from "@/lib/googleSheet";
+import { type SortOrder } from "@/lib/sheetSort";
+import { DEFAULT_PAGE_SIZE } from "@/lib/sheetPagination";
+import { processEmployeeSheet } from "@/lib/employeeSheetRows";
+import { getSheetHeaders, sheetRowToRange } from "@/lib/employeeForm";
 
 /**
  * GET
@@ -22,12 +26,74 @@ export async function GET(req: NextRequest) {
         const range =
             searchParams.get("range") || "Sheet1!A1:Z1000";
 
-        const data = await readSheet(range);
+        const sortBy = searchParams.get("sortBy");
+        const orderParam = searchParams.get("order");
+        const order: SortOrder =
+            orderParam === "desc" ? "desc" : "asc";
+
+        const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
+        const pageSize = Math.min(
+            100,
+            Math.max(1, parseInt(searchParams.get("pageSize") ?? String(DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE),
+        );
+
+        const search = searchParams.get("search")?.trim() ?? "";
+        const status = searchParams.get("status")?.trim() ?? "";
+        const rowParam = searchParams.get("row");
+        const headersOnly = searchParams.get("headersOnly") === "true";
+
+        if (headersOnly) {
+            const headerRow = await readSheet("Sheet1!1:1");
+            const headers = getSheetHeaders(headerRow.length ? headerRow : [[]]);
+
+            return NextResponse.json(
+                { success: true, headers },
+                { status: 200 },
+            );
+        }
+
+        const raw = await readSheet(range);
+
+        if (rowParam) {
+            const sheetRow = parseInt(rowParam, 10);
+            if (!Number.isFinite(sheetRow) || sheetRow < 2 || sheetRow > raw.length) {
+                return NextResponse.json(
+                    { success: false, message: "Employee not found" },
+                    { status: 404 },
+                );
+            }
+
+            const headers = getSheetHeaders(raw);
+            return NextResponse.json(
+                {
+                    success: true,
+                    headers,
+                    row: raw[sheetRow - 1] ?? [],
+                    sheetRow,
+                },
+                { status: 200 },
+            );
+        }
+
+        const { data, sheetRows, pagination } = processEmployeeSheet({
+            data: raw,
+            search,
+            status,
+            sortBy,
+            order,
+            page,
+            pageSize,
+        });
 
         return NextResponse.json(
             {
                 success: true,
                 data,
+                sheetRows,
+                pagination,
+                sort: sortBy ? { sortBy, order } : null,
+                search: search || null,
+                status: status || null,
             },
             { status: 200 }
         );
@@ -109,17 +175,7 @@ export async function PUT(req: NextRequest) {
     try {
         const body = await req.json();
 
-        const { range, values } = body;
-
-        if (!range) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message: "range is required",
-                },
-                { status: 400 }
-            );
-        }
+        const { range, values, sheetRow } = body;
 
         if (!values || !Array.isArray(values)) {
             return NextResponse.json(
@@ -131,7 +187,24 @@ export async function PUT(req: NextRequest) {
             );
         }
 
-        const response = await updateSheetRow(range, values);
+        let updateRange = range;
+        if (!updateRange && sheetRow) {
+            const rowValues = values[0] as string[] | undefined;
+            const colCount = rowValues?.length ?? 1;
+            updateRange = sheetRowToRange(Number(sheetRow), colCount);
+        }
+
+        if (!updateRange) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: "range or sheetRow is required",
+                },
+                { status: 400 }
+            );
+        }
+
+        const response = await updateSheetRow(updateRange, values);
 
         return NextResponse.json(
             {
