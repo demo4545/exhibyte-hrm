@@ -1,29 +1,45 @@
 "use client";
 
-import { useEffect } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { PageHeader } from "@/components/ui/page-header";
+import { AccessDenied } from "@/components/ui/access-denied";
 import { Button } from "@/components/ui/button";
 import { EmployeeForm } from "@/components/employee/employee-form";
 import { useAuth } from "@/contexts/auth-provider";
+import { ROLES } from "@/app/consts/common";
 
 export default function AddEmployeePage() {
-  const router = useRouter();
   const { user, loading: authLoading } = useAuth();
 
   const canManage =
-    user?.role === "hr" || user?.role === "super_admin";
+    user?.role === ROLES.HR_MANAGER || user?.role === ROLES.SUPER_ADMIN;
 
-  useEffect(() => {
-    if (authLoading) return;
-    if (!canManage) router.replace("/employee");
-  }, [authLoading, canManage, router]);
-
-  if (authLoading || !canManage) {
+  if (authLoading) {
     return null;
+  }
+
+  if (!canManage) {
+    return (
+      <div className="space-y-8">
+        <PageHeader
+          title="Add employee"
+          description="Enter employee details to create a new record."
+        />
+        <AccessDenied
+          description="Only HR and Super Admin roles can add employees."
+          action={
+            <Link href="/employee">
+              <Button variant="outline" size="sm">
+                <ArrowLeft className="size-4" />
+                Back to directory
+              </Button>
+            </Link>
+          }
+        />
+      </div>
+    );
   }
 
   return (

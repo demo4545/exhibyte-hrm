@@ -1,6 +1,6 @@
 export type SortOrder = "asc" | "desc";
 
-export function headerToKey(header: string) {
+export function headerToKey(header: string): string {
   return header.trim().toLowerCase().replace(/\s+/g, "_");
 }
 

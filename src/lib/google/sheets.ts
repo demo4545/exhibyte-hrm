@@ -1,40 +1,21 @@
-// lib/googleSheet.ts
-
-import { google } from "googleapis";
-
-const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(
-    /\\n/g,
-    "\n"
-);
-
-const auth = new google.auth.GoogleAuth({
-    credentials: {
-        client_email: process.env.GOOGLE_CLIENT_EMAIL,
-        private_key: GOOGLE_PRIVATE_KEY,
-    },
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-});
-
-export const getGoogleSheetsInstance = async () => {
-    const authClient = await auth.getClient();
-
-    return google.sheets({
-        version: "v4",
-        auth: authClient as any,
-    });
-};
+import { getSheetHeaders } from "@/lib/employee";
+import { sheets } from "./auth";
 
 const spreadsheetId = process.env.GOOGLE_SHEET_ID as string;
 
+export const getSheetHeadersData = async () => {
+    const rows = await readSheet("Sheet1");
+
+    return getSheetHeaders(rows);
+};
+
 /**
- * Read data from sheet
+ * Read Sheet Data
  */
 export const readSheet = async (
     range: string = "Sheet1"
 ) => {
     try {
-        const sheets = await getGoogleSheetsInstance();
-
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId,
             range,
@@ -48,14 +29,12 @@ export const readSheet = async (
 };
 
 /**
- * Append new row
+ * Append Rows
  */
 export const appendSheetRow = async (
     values: (string | number)[][]
 ) => {
     try {
-        const sheets = await getGoogleSheetsInstance();
-
         const response = await sheets.spreadsheets.values.append({
             spreadsheetId,
             range: "Sheet1",
@@ -73,15 +52,13 @@ export const appendSheetRow = async (
 };
 
 /**
- * Update existing row/cells
+ * Update Rows
  */
 export const updateSheetRow = async (
     range: string,
     values: (string | number)[][]
 ) => {
     try {
-        const sheets = await getGoogleSheetsInstance();
-
         const response = await sheets.spreadsheets.values.update({
             spreadsheetId,
             range,
@@ -93,18 +70,18 @@ export const updateSheetRow = async (
 
         return response.data;
     } catch (error) {
-        console.error("Update Row Error:", error);
+        console.error("Update Sheet Error:", error);
         throw error;
     }
 };
 
 /**
- * Clear range
+ * Clear Range
  */
-export const clearSheetRange = async (range: string) => {
+export const clearSheetRange = async (
+    range: string
+) => {
     try {
-        const sheets = await getGoogleSheetsInstance();
-
         const response = await sheets.spreadsheets.values.clear({
             spreadsheetId,
             range,
@@ -115,4 +92,11 @@ export const clearSheetRange = async (range: string) => {
         console.error("Clear Sheet Error:", error);
         throw error;
     }
+};
+
+export const getEmployeeCount = async () => {
+    const rows = await readSheet("Sheet1");
+
+    // remove header row
+    return Math.max(rows.length - 1, 0);
 };

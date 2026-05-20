@@ -8,12 +8,13 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { MobileDrawer } from "@/components/layout/app-sidebar";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
+import { ROLES } from "@/app/consts/common";
 
 
 const roleLabel: Record<string, string> = {
-  super_admin: "Super Admin",
-  hr: "HR",
-  employee: "Employee",
+  [ROLES.SUPER_ADMIN]: "Super Administrator",
+  [ROLES.HR_MANAGER]: "HR Manager",
+  [ROLES.EMPLOYEE]: "Employee",
 };
 
 export function AppHeader() {

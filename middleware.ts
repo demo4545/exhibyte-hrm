@@ -4,7 +4,13 @@ import { COOKIE, decodeSession } from "@/lib/session";
 import { canAccessPath } from "@/lib/rbac";
 import type { UserRole } from "@/types/auth";
 
-const PUBLIC = ["/login", "/api/auth/login", "/api/auth/me"];
+const PUBLIC = [
+  "/login",
+  "/api/auth/login",
+  "/api/auth/me",
+  // Google OAuth redirect — must not require session (code is in query string)
+  "/api/integrations/google-drive/callback",
+];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -18,7 +24,6 @@ export function middleware(req: NextRequest) {
 
   const raw = req.cookies.get(COOKIE)?.value;
   const user = raw ? decodeSession(raw) : null;
-  console.log("user", user);
 
   if (pathname === "/login" && user) {
     return NextResponse.redirect(new URL("/dashboard", req.url));

@@ -1,0 +1,42 @@
+import { getDocumentDisplayName } from "@/lib/employee/documents";
+import { UploadIcon } from "lucide-react";
+import { Input } from "./input";
+import { Label } from "./label";
+
+export type DocumentField = "pancard" | "aadharCard" | "marksheet" | "profileImage";
+
+export function FileUploaderField({
+    id,
+    fileName,
+    onChange,
+}: {
+    id: DocumentField;
+    fileName: string;
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}) {
+    const displayName = getDocumentDisplayName(id, fileName);
+
+    return (
+        <div className="space-y-2 relative">
+            <Input
+                id={id}
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                onChange={onChange}
+                className="sr-only"
+            />
+            <Label
+                htmlFor={id}
+                className="flex cursor-pointer items-center justify-between rounded-lg border border-dashed border-ex-border bg-ex-bg px-3 py-2 text-sm transition-colors hover:border-ex-ring hover:bg-ex-surface"
+            >
+                <span className={displayName ? "text-ex-text" : "text-ex-muted"}>
+                    {displayName || "Upload file..."}
+                </span>
+                <span className="inline-flex items-center gap-1 text-xs text-ex-muted">
+                    <UploadIcon className="size-4" />
+                    Browse
+                </span>
+            </Label>
+        </div>
+    );
+}

@@ -6,11 +6,28 @@ import {
     appendSheetRow,
     updateSheetRow,
     clearSheetRange,
-} from "@/lib/googleSheet";
-import { type SortOrder } from "@/lib/sheetSort";
-import { DEFAULT_PAGE_SIZE } from "@/lib/sheetPagination";
-import { processEmployeeSheet } from "@/lib/employeeSheetRows";
-import { getSheetHeaders, sheetRowToRange } from "@/lib/employeeForm";
+    getEmployeeCount,
+    getSheetHeadersData
+} from "@/lib/google/sheets";
+import {
+    createEmployeeFolderStructure,
+    uploadEmployeeDocuments,
+} from "@/lib/google/drive";
+import {
+    type SortOrder,
+    DEFAULT_PAGE_SIZE,
+    processEmployeeSheet,
+    getSheetHeaders,
+    sheetRowToRange,
+    generateEmployeeId,
+    getEmployeeNameFromRow,
+    headerToFormKey,
+    mergeRowWithFormFields,
+} from "@/lib/employee";
+import {
+    filesToUploadBuffers,
+    parseEmployeeSubmit,
+} from "@/lib/employee/server";
 
 /**
  * GET
@@ -121,40 +138,102 @@ export async function GET(req: NextRequest) {
  *   ]
  * }
  */
-export async function POST(req: NextRequest) {
+
+export async function POST(req: Request) {
     try {
-        const body = await req.json();
+        const { values, files } = await parseEmployeeSubmit(req);
 
-        const { values } = body;
+        const headers = await getSheetHeadersData();
 
-        if (!values || !Array.isArray(values)) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message: "values array is required",
-                },
-                { status: 400 }
-            );
+        // Get employee count
+        const totalEmployees = await getEmployeeCount();
+
+        // Generate employee ID
+        const employeeId = generateEmployeeId(totalEmployees);
+
+        const employeeName = getEmployeeNameFromRow(headers, values);
+
+        // Create Drive folders
+        const folders = await createEmployeeFolderStructure(
+            employeeId,
+            employeeName,
+        );
+
+        const documentsFolderId = folders.documentsFolderId;
+        if (!documentsFolderId) {
+            throw new Error("Failed to create employee documents folder");
         }
 
-        const response = await appendSheetRow(values);
+        const rowValues = mergeRowWithFormFields(headers, values, {
+            employeeId,
+            documentsFolderId,
+        });
 
-        return NextResponse.json(
-            {
-                success: true,
-                data: response,
-            },
-            { status: 201 }
-        );
+        await appendSheetRow([rowValues]);
+
+        const newSheetRow = totalEmployees + 2;
+        const fileBuffers = await filesToUploadBuffers(files);
+        let documentWarning: string | undefined;
+
+        if (Object.keys(fileBuffers).length > 0) {
+            try {
+                const documentLinks = await uploadEmployeeDocuments(
+                    documentsFolderId,
+                    fileBuffers,
+                );
+
+                if (Object.keys(documentLinks).length > 0) {
+                    const rowWithDocs = mergeRowWithFormFields(
+                        headers,
+                        rowValues,
+                        documentLinks,
+                    );
+                    await updateSheetRow(
+                        sheetRowToRange(newSheetRow, headers.length),
+                        [rowWithDocs],
+                    );
+                }
+            } catch (uploadError: any) {
+                console.error(
+                    "UPLOAD ERROR FULL:",
+                    JSON.stringify(uploadError, null, 2)
+                );
+
+                console.error(
+                    "UPLOAD ERROR MESSAGE:",
+                    uploadError?.message
+                );
+
+                console.error(
+                    "UPLOAD ERROR RESPONSE:",
+                    uploadError?.response?.data
+                );
+
+                documentWarning =
+                    uploadError instanceof Error
+                        ? uploadError.message
+                        : "Document upload failed";
+            }
+        }
+
+        return Response.json({
+            success: true,
+            message: documentWarning
+                ? `Employee saved, but documents could not be uploaded: ${documentWarning}`
+                : "Employee created successfully",
+            documentWarning: documentWarning ?? null,
+        });
     } catch (error: any) {
-        console.error("POST Sheet Error:", error);
+        console.error(error);
 
-        return NextResponse.json(
+        return Response.json(
             {
                 success: false,
-                message: error.message || "Failed to append row",
+                message: error.message,
             },
-            { status: 500 }
+            {
+                status: 500,
+            }
         );
     }
 }
@@ -173,9 +252,58 @@ export async function POST(req: NextRequest) {
  */
 export async function PUT(req: NextRequest) {
     try {
-        const body = await req.json();
+        const contentType = req.headers.get("content-type") ?? "";
+        let range: string | undefined;
+        let values: string[][];
+        let sheetRow: number | undefined;
 
-        const { range, values, sheetRow } = body;
+        if (contentType.includes("multipart/form-data")) {
+            const payload = await parseEmployeeSubmit(req);
+            sheetRow = payload.sheetRow;
+            values = [payload.values];
+
+            const headers = await getSheetHeadersData();
+            const docColIndex = headers.findIndex(
+                (h) => headerToFormKey(h) === "documentsFolderId",
+            );
+            const documentsFolderId =
+                docColIndex >= 0
+                    ? String(payload.values[docColIndex] ?? "").trim()
+                    : "";
+
+            let rowValues = payload.values;
+
+            if (Object.keys(payload.files).length > 0) {
+                if (!documentsFolderId) {
+                    return NextResponse.json(
+                        {
+                            success: false,
+                            message:
+                                "Documents folder not found for this employee",
+                        },
+                        { status: 400 },
+                    );
+                }
+
+                const documentLinks = await uploadEmployeeDocuments(
+                    documentsFolderId,
+                    await filesToUploadBuffers(payload.files),
+                );
+
+                rowValues = mergeRowWithFormFields(
+                    headers,
+                    payload.values,
+                    documentLinks,
+                );
+            }
+
+            values = [rowValues];
+        } else {
+            const body = await req.json();
+            range = body.range;
+            values = body.values;
+            sheetRow = body.sheetRow != null ? Number(body.sheetRow) : undefined;
+        }
 
         if (!values || !Array.isArray(values)) {
             return NextResponse.json(

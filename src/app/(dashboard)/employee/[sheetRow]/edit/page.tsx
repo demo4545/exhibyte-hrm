@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { EmployeeForm } from "@/components/employee/employee-form";
 import { useAuth } from "@/contexts/auth-provider";
+import { ROLES } from "@/app/consts/common";
 
 export default function EditEmployeePage() {
   const router = useRouter();
@@ -19,7 +20,7 @@ export default function EditEmployeePage() {
   const validRow = Number.isFinite(sheetRow) && sheetRow >= 2;
 
   const canManage =
-    user?.role === "hr" || user?.role === "super_admin";
+    user?.role === ROLES.HR_MANAGER || user?.role === ROLES.SUPER_ADMIN;
 
   useEffect(() => {
     if (authLoading) return;

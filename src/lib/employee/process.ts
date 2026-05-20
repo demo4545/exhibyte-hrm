@@ -1,8 +1,9 @@
 import { STATUS } from "@/app/consts/common";
-import { getSheetHeaders } from "@/lib/employeeForm";
-import { EMPLOYEE_SEARCH_KEYS } from "@/lib/sheetSearch";
-import { headerToKey, type SortOrder } from "@/lib/sheetSort";
-import { DEFAULT_PAGE_SIZE, type SheetPagination } from "@/lib/sheetPagination";
+import { getSheetHeaders } from "./headers";
+import { EMPLOYEE_SEARCH_KEYS } from "./search";
+import { headerToKey, type SortOrder } from "./sort";
+import { DEFAULT_PAGE_SIZE } from "./pagination";
+import type { SheetPagination } from "@/types/sheet";
 
 export type IndexedSheetRow = {
   sheetRow: number;

@@ -33,9 +33,15 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# Google Drive OAuth tokens
+.data/
+
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+hrm-system-496809-923c516e41b6.json
+client_secret_356034774619-05qhdnufnaie21dhu9o10r04hauprave.apps.googleusercontent.com.json

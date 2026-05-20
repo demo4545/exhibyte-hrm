@@ -1,9 +1,4 @@
-export type SheetPagination = {
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages: number;
-};
+import type { SheetPagination } from "@/types/sheet";
 
 export const DEFAULT_PAGE_SIZE = 12;
 

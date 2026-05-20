@@ -25,7 +25,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           data: { loading, path: typeof window !== "undefined" ? window.location.pathname : "" },
           timestamp: Date.now(),
         }),
-      }).catch(() => {});
+      }).catch(() => { });
       // #endregion
       router.replace("/login");
     }

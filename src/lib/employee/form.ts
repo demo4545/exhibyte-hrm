@@ -1,20 +1,27 @@
 import { STATUS } from "@/app/consts/common";
-import { headerToKey } from "@/lib/sheetSort";
 
 export const initialEmployeeForm = {
+  employeeId: "",
   status: STATUS.ACTIVE,
   name: "",
   address: "",
   pancard: "",
   aadharCard: "",
   marksheet: "",
-  parentGuardian: "",
+  parentName: "",
+  parentContact: "",
+  parentDetails: "",
   experience: "",
   joiningDate: "",
-  techSkills: "",
+  skills: "",
   role: "",
   birthdayDate: "",
   lastIncrementDate: "",
+  documentsFolderId: "",
+  profileImage: "",
+  position: "",
+  email: "",
+  contactNumber: "",
 };
 
 export type EmployeeFormState = {
@@ -23,23 +30,42 @@ export type EmployeeFormState = {
 
 /** Maps normalized sheet header → form field key */
 const SHEET_KEY_TO_FORM: Record<string, keyof EmployeeFormState> = {
+  employee_id: "employeeId",
   status: "status",
   name: "name",
   role: "role",
-  tech_skills: "techSkills",
+  skills: "skills",
   experience: "experience",
-  joining_date: "joiningDate",
-  last_increment_date: "lastIncrementDate",
   address: "address",
   birthday_date: "birthdayDate",
+  joining_date: "joiningDate",
+  email: "email",
+  contact_number: "contactNumber",
+  profile_image: "profileImage",
+  position: "position",
   pancard: "pancard",
   aadhar_card: "aadharCard",
+  parent_name: "parentName",
+  parent_contact: "parentContact",
+  parent_details: "parentDetails",
+  last_increment_date: "lastIncrementDate",
   marksheet: "marksheet",
-  parent_guardian_information: "parentGuardian",
+  documents_folder_id: "documentsFolderId",
 };
 
-export function headerToFormKey(header: string): keyof EmployeeFormState | null {
-  const key = headerToKey(header);
+/** Normalize sheet header for form lookup (camelCase, spaces → snake_case). */
+function headerToSheetFormLookupKey(header: string): string {
+  return header
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/\s+/g, "_")
+    .toLowerCase();
+}
+
+export function headerToFormKey(
+  header: string,
+): keyof EmployeeFormState | null {
+  const key = headerToSheetFormLookupKey(header);
   return SHEET_KEY_TO_FORM[key] ?? null;
 }
 
@@ -64,18 +90,26 @@ export function sheetRowToForm(
   row: string[],
 ): EmployeeFormState {
   const form: EmployeeFormState = {
+    employeeId: "",
+    documentsFolderId: "",
     name: "",
     address: "",
     pancard: "",
     aadharCard: "",
     marksheet: "",
-    parentGuardian: "",
+    parentName: "",
+    parentContact: "",
+    parentDetails: "",
     experience: "",
     joiningDate: "",
-    techSkills: "",
+    position: "",
+    skills: "",
     role: "",
     birthdayDate: "",
     lastIncrementDate: "",
+    profileImage: "",
+    email: "",
+    contactNumber: "",
     status: STATUS.ACTIVE,
   };
 
@@ -105,32 +139,4 @@ export function normalizeStatus(value: string): string {
     return STATUS.ACTIVE;
   }
   return value.trim() ? value.trim() : STATUS.ACTIVE;
-}
-
-/** Build A1 range for a single sheet row (e.g. Sheet1!A5:L5) */
-export function sheetRowToRange(sheetRow: number, columnCount: number): string {
-  const endColumn = columnIndexToLetter(columnCount);
-  return `Sheet1!A${sheetRow}:${endColumn}${sheetRow}`;
-}
-
-function columnIndexToLetter(columnCount: number): string {
-  let letter = "";
-  let n = Math.max(1, columnCount);
-
-  while (n > 0) {
-    const remainder = (n - 1) % 26;
-    letter = String.fromCharCode(65 + remainder) + letter;
-    n = Math.floor((n - 1) / 26);
-  }
-
-  return letter;
-}
-
-/** Header row from sheet; trims trailing blank columns only */
-export function getSheetHeaders(sheetData: string[][]): string[] {
-  const headers = [...((sheetData[0] as string[]) ?? [])];
-  while (headers.length > 0 && !headers[headers.length - 1]?.trim()) {
-    headers.pop();
-  }
-  return headers;
 }

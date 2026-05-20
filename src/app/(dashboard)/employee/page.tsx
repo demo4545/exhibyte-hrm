@@ -5,22 +5,20 @@ import Link from "next/link";
 import { Pencil, Plus, Search } from "lucide-react";
 
 import { PageHeader } from "@/components/ui/page-header";
-import { Column, DataTable, type SortOrder } from "@/components/ui/data-table";
+import { DataTable } from "@/components/ui/data-table";
 import { Pagination } from "@/components/ui/pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/auth-provider";
-import { headerToKey } from "@/lib/sheetSort";
-import {
-  DEFAULT_PAGE_SIZE,
-  type SheetPagination,
-} from "@/lib/sheetPagination";
+import { DEFAULT_PAGE_SIZE, pickSheetRowFields, resolveProfileImageSrc } from "@/lib/employee";
 import { Input } from "@/components/ui/input";
-import { STATUS } from "@/app/consts/common";
-import { Label } from "@/components/ui/label";
+import { ROLES, STATUS } from "@/app/consts/common";
+import { EMPLOYEE_LIST_COLUMNS } from "@/app/consts/employee-list";
 import { Select } from "@/components/ui/select";
 
-type EmployeeRow = { id: string } & Record<string, string>;
+import type { EmployeeRow } from "@/types/employee";
+import type { SheetPagination } from "@/types/sheet";
+import type { Column, SortOrder } from "@/types/table";
 
 const emptyPagination: SheetPagination = {
   page: 1,
@@ -28,6 +26,70 @@ const emptyPagination: SheetPagination = {
   total: 0,
   totalPages: 0,
 };
+
+const LIST_FIELD_KEYS = EMPLOYEE_LIST_COLUMNS.map((column) => column.key);
+
+function buildListColumns(canManage: boolean): Column<EmployeeRow>[] {
+  const tableColumns: Column<EmployeeRow>[] = EMPLOYEE_LIST_COLUMNS.map(
+    ({ key, header, sortable }) => ({
+      key,
+      header,
+      sortable,
+      ...(key === "profileImage" && {
+        render: (row: EmployeeRow) => (
+          <img src={resolveProfileImageSrc(row.profileImage) ?? ""} alt="Profile" className="size-10 rounded-full border border-ex-border object-cover" />
+        ),
+      }),
+      ...(key === "status" && {
+        render: (row: EmployeeRow) => (
+          <Badge
+            variant={row.status === STATUS.ACTIVE ? "success" : "danger"}
+          >
+            {row.status}
+          </Badge>
+        ),
+      }),
+      ...(key === "role" && {
+        render: (row: EmployeeRow) => (
+          <span className="capitalize">{row.role.split("_").join(" ")}</span>
+        ),
+      }),
+      ...(key === "position" && {
+        render: (row: EmployeeRow) => (
+          <span className="capitalize">{row.position.split("_").join(" ")}</span>
+        ),
+      }),
+      ...(key === "contactNumber" && {
+        render: (row: EmployeeRow) => (
+          <span className="capitalize">+91 {row.contactNumber.replace(/(\d{5})(\d{5})/, "$1 $2")}</span>
+        ),
+      }),
+    }),
+  );
+
+  if (!canManage) {
+    return tableColumns;
+  }
+
+  return [
+    ...tableColumns,
+    {
+      key: "actions",
+      header: "Actions",
+      sortable: false,
+      sticky: "right",
+      className: "min-w-[5.5rem]",
+      render: (row: EmployeeRow) => (
+        <Link href={`/employee/${row.id}/edit`}>
+          <Button variant="ghost" size="sm" type="button">
+            <Pencil className="size-3.5" />
+            Edit
+          </Button>
+        </Link>
+      ),
+    },
+  ];
+}
 
 export default function EmployeeDirectoryPage() {
   const { user } = useAuth();
@@ -69,61 +131,19 @@ export default function EmployeeDirectoryPage() {
       if (result.success) {
         const sheetData = result.data || [];
         const headers = (sheetData[0] as string[]) ?? [];
-        const keys = headers.map(headerToKey);
-
-        const tableColumns = headers.map((header, i) => ({
-          key: keys[i],
-          header,
-          ...(keys[i] === "status" && {
-            render: (r: EmployeeRow) => (
-              <>
-                <Badge variant={r.status === STATUS.ACTIVE ? "success" : "danger"}>{r.status}</Badge>
-              </>
-            ),
-          }),
-        }));
-
         const dataRows = sheetData.slice(1);
         const pageInfo: SheetPagination = result.pagination ?? emptyPagination;
         const sheetRows: number[] = result.sheetRows ?? [];
 
         const canManage =
-          user?.role === "hr" || user?.role === "super_admin";
+          user?.role === ROLES.HR_MANAGER || user?.role === ROLES.SUPER_ADMIN;
 
-        const formattedData = dataRows.map((row: string[], index: number) => {
-          const record: Record<string, string> = {
-            id: String(sheetRows[index] ?? index + 1),
-          };
+        const formattedData = dataRows.map((row: string[], index: number) => ({
+          id: String(sheetRows[index] ?? index + 1),
+          ...pickSheetRowFields(headers, row, LIST_FIELD_KEYS),
+        })) as EmployeeRow[];
 
-          keys.forEach((key, colIndex) => {
-            record[key] = row[colIndex] ?? "";
-          });
-
-          return record as EmployeeRow;
-        });
-
-        const columnsWithActions = canManage
-          ? [
-            ...tableColumns,
-            {
-              key: "actions",
-              header: "",
-              sortable: false,
-              sticky: "right",
-              className: "min-w-[5.5rem]",
-              render: (r: EmployeeRow) => (
-                <Link href={`/employee/${r.id}/edit`}>
-                  <Button variant="ghost" size="sm" type="button">
-                    <Pencil className="size-3.5" />
-                    Edit
-                  </Button>
-                </Link>
-              ),
-            },
-          ]
-          : tableColumns;
-
-        setColumns(columnsWithActions as Column<EmployeeRow>[]);
+        setColumns(buildListColumns(canManage));
         setRows(formattedData);
         setPagination(pageInfo);
       }
@@ -159,8 +179,8 @@ export default function EmployeeDirectoryPage() {
         title="All Employees"
         description="View and manage all employees in the organization."
         actions={
-          (user?.role === "hr" ||
-            user?.role === "super_admin") && (
+          (user?.role === ROLES.HR_MANAGER ||
+            user?.role === ROLES.SUPER_ADMIN) && (
             <Link href="/employee/new">
               <Button variant="secondary" size="sm">
                 <Plus className="size-4" />

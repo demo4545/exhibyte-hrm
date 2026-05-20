@@ -10,13 +10,27 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
+  EMPLOYEE_DOCUMENT_FIELDS,
   formToSheetRow,
   initialEmployeeForm,
   sheetRowToForm,
   type EmployeeFormState,
-} from "@/lib/employeeForm";
+} from "@/lib/employee";
 import { EyeIcon, EyeOffIcon } from "lucide-react";
-import { STATUS } from "@/app/consts/common";
+import { POSITIONS, ROLES, STATUS } from "@/app/consts/common";
+import {
+  ALL_TECH_SKILLS,
+  joinSkillsValue,
+  parseSkillsValue,
+} from "@/app/consts/tech-skills";
+import { Select } from "../ui/select";
+import { resolveProfileImageSrc } from "@/lib/employee/documents";
+import { type DocumentField, FileUploaderField } from "../ui/file-uploader";
+import { IndianPhoneInput } from "../ui/indian-phone-input";
+import { MultiSelect } from "../ui/multi-select";
+import { DateInput } from "../ui/date-input";
+import { FormSkeleton } from "../ui/form-skeleton";
+
 
 function FormField({
   label,
@@ -52,10 +66,36 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
   const [headersLoading, setHeadersLoading] = useState(!isEdit);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [documentFiles, setDocumentFiles] = useState<
+    Partial<Record<DocumentField, File>>
+  >({});
+  const [profileImagePreview, setProfileImagePreview] = useState<string | null>(
+    null,
+  );
+
+  const profileImageSrc = resolveProfileImageSrc(
+    form.profileImage,
+    profileImagePreview,
+  );
 
   useEffect(() => {
     void loadForm();
   }, [mode, sheetRow]);
+
+  useEffect(() => {
+    return () => {
+      if (profileImagePreview?.startsWith("blob:")) {
+        URL.revokeObjectURL(profileImagePreview);
+      }
+    };
+  }, [profileImagePreview]);
+
+  const clearProfileImagePreview = () => {
+    setProfileImagePreview((prev) => {
+      if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+      return null;
+    });
+  };
 
   const loadForm = async () => {
     try {
@@ -65,6 +105,7 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
         setHeadersLoading(true);
       }
       setError(null);
+      clearProfileImagePreview();
 
       if (isEdit && sheetRow) {
         const response = await fetch(`/api/employee?row=${sheetRow}`);
@@ -106,18 +147,27 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
 
   const update =
     (field: keyof EmployeeFormState) =>
-      (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         setForm((prev) => ({ ...prev, [field]: e.target.value }));
       };
 
   const handleFile =
-    (field: "pancard" | "aadharCard" | "marksheet") =>
+    (field: DocumentField) =>
       (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        setForm((prev) => ({
-          ...prev,
-          [field]: file?.name ?? prev[field],
-        }));
+        if (!file) return;
+
+        setDocumentFiles((prev) => ({ ...prev, [field]: file }));
+        setForm((prev) => ({ ...prev, [field]: file.name }));
+
+        if (field === "profileImage") {
+          setProfileImagePreview((prev) => {
+            if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+            return file.type.startsWith("image/")
+              ? URL.createObjectURL(file)
+              : null;
+          });
+        }
       };
 
   const saveEmployee = async (formData: EmployeeFormState) => {
@@ -129,21 +179,31 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
     setError(null);
     setSubmitting(true);
 
+
     const rowValues = formToSheetRow(formData, sheetHeaders);
+
+    const body = new FormData();
+    body.append("values", JSON.stringify([rowValues]));
+    if (isEdit && sheetRow) {
+      body.append("sheetRow", String(sheetRow));
+    }
+    for (const field of EMPLOYEE_DOCUMENT_FIELDS) {
+      const file = documentFiles[field];
+      if (file) body.append(field, file);
+    }
 
     try {
       const response = await fetch("/api/employee", {
         method: isEdit ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          isEdit
-            ? { sheetRow, values: [rowValues] }
-            : { values: [rowValues] },
-        ),
+        body,
       });
       const result = await response.json();
 
       if (result.success) {
+        if (result.documentWarning) {
+          setError(result.message || String(result.documentWarning));
+          return;
+        }
         router.push("/employee");
         return;
       }
@@ -177,156 +237,266 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
   };
 
   if (loading) {
-    return <p className="text-sm text-ex-muted">Loading employee…</p>;
+    return <FormSkeleton label="Loading employee…" fields={8} />;
   }
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-3xl space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Employee details</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <FormField label="Name" id="name">
-            <Input
-              id="name"
-              value={form.name}
-              onChange={update("name")}
-              placeholder="Full legal name"
-              required
-            />
-          </FormField>
+    <form onSubmit={handleSubmit} >
+      <div className="flex flex-col xl:flex-row gap-4 mb-4">
+        <div className="space-y-6 w-full xl:w-1/2 max-w-3xl">
+          <Card>
+            <CardHeader>
+              <CardTitle>Employee details</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-4 sm:grid-cols-2">
+              <FormField label="Name" id="name">
+                <Input
+                  id="name"
+                  value={form.name}
+                  onChange={update("name")}
+                  placeholder="Employee Full Name"
+                  required
+                />
+              </FormField>
 
-          <FormField label="Role" id="role">
-            <Input
-              id="role"
-              value={form.role}
-              onChange={update("role")}
-              placeholder="e.g. Software Engineer"
-              required
-            />
-          </FormField>
+              <FormField label="Role" id="role">
+                <Select
+                  id="role"
+                  value={form.role}
+                  onChange={update("role")}
+                  required
+                >
+                  <option value="">Select Role</option>
+                  <option value={ROLES.SUPER_ADMIN}>Super Administrator</option>
+                  <option value={ROLES.HR_MANAGER}>HR Manager</option>
+                  <option value={ROLES.EMPLOYEE}>Employee</option>
+                </Select>
+              </FormField>
 
-          <div className="space-y-2 sm:col-span-2">
-            <Label htmlFor="address">Address</Label>
-            <Textarea
-              id="address"
-              value={form.address}
-              onChange={update("address")}
-              placeholder="Residential address"
-              rows={3}
-            />
-          </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="address">Address</Label>
+                <Textarea
+                  id="address"
+                  value={form.address}
+                  onChange={update("address")}
+                  placeholder="Residential address"
+                  rows={3}
+                />
+              </div>
 
-          <FormField label="Birthday date" id="birthdayDate">
-            <Input
-              id="birthdayDate"
-              type="date"
-              value={form.birthdayDate}
-              onChange={update("birthdayDate")}
-            />
-          </FormField>
+              <FormField label="Birthday date" id="birthdayDate">
+                <DateInput
+                  id="birthdayDate"
+                  value={form.birthdayDate}
+                  onChange={(birthdayDate) =>
+                    setForm((prev) => ({ ...prev, birthdayDate }))
+                  }
+                  maxYear={new Date().getFullYear()}
+                />
+              </FormField>
+            </CardContent>
+          </Card>
 
-          <FormField label="Joining date" id="joiningDate">
-            <Input
-              id="joiningDate"
-              type="date"
-              value={form.joiningDate}
-              onChange={update("joiningDate")}
-            />
-          </FormField>
+          <Card>
+            <CardHeader>
+              <CardTitle>Documents</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-4 sm:grid-cols-2">
+              <FormField label="Pancard" id="pancard">
+                <FileUploaderField
+                  id="pancard"
+                  fileName={form.pancard}
+                  onChange={handleFile("pancard")}
+                />
+              </FormField>
 
-          <FormField label="Last increment date" id="lastIncrementDate">
-            <Input
-              id="lastIncrementDate"
-              type="date"
-              value={form.lastIncrementDate}
-              onChange={update("lastIncrementDate")}
-            />
-          </FormField>
+              <FormField label="Aadhar card" id="aadharCard">
+                <FileUploaderField
+                  id="aadharCard"
+                  fileName={form.aadharCard}
+                  onChange={handleFile("aadharCard")}
+                />
+              </FormField>
 
-          <FormField label="Experience" id="experience">
-            <Input
-              id="experience"
-              value={form.experience}
-              onChange={update("experience")}
-              placeholder="Years of experience"
-              required
-            />
-          </FormField>
+              <FormField label="Marksheet" id="marksheet">
+                <FileUploaderField
+                  id="marksheet"
+                  fileName={form.marksheet}
+                  onChange={handleFile("marksheet")}
+                />
+              </FormField>
+            </CardContent>
+          </Card>
 
-          <FormField label="Tech skills" id="techSkills" className="sm:col-span-2">
-            <Input
-              id="techSkills"
-              value={form.techSkills}
-              onChange={update("techSkills")}
-              placeholder="e.g. React, Node.js, PostgreSQL"
-            />
-          </FormField>
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Parent / guardian information</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 sm:grid-cols-2 mb-4">
+                <FormField label="Parent / Guardian Name" id="parentName">
+                  <Input
+                    id="parentName"
+                    value={form.parentName}
+                    onChange={update("parentName")}
+                    placeholder="Parent / Guardian Name"
+                    required
+                  />
+                </FormField>
+                <FormField label="Parent / Guardian Contact" id="parentContact">
+                  <IndianPhoneInput
+                    id="parentContact"
+                    value={form.parentContact}
+                    onChange={(value) => setForm((prev) => ({ ...prev, parentContact: value }))}
+                    placeholder="Parent / Guardian Contact"
+                    required
+                  />
+                </FormField>
+              </div>
+              <FormField label="Parent / Guardian Details" id="parentDetails">
+                <Textarea
+                  id="parentDetails"
+                  value={form.parentDetails}
+                  onChange={update("parentDetails")}
+                  placeholder="Parent / Guardian Details"
+                  required
+                />
+              </FormField>
+            </CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Documents</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <FormField label="Pancard" id="pancard">
-            <Input
-              id="pancard"
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
-              onChange={handleFile("pancard")}
-            />
-            {form.pancard ? (
-              <p className="text-xs text-ex-muted">{form.pancard}</p>
-            ) : null}
-          </FormField>
+          {error ? (
+            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+          ) : null}
+        </div>
+        <div className="space-y-6 w-full xl:w-1/2 max-w-3xl">
+          <Card>
+            <CardHeader>
+              <CardTitle>Profile</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex justify-center items-center mb-4">
+                {profileImageSrc ? (
+                  <img
+                    src={profileImageSrc}
+                    alt="Profile"
+                    className="size-24 rounded-full border border-ex-border object-cover"
+                  />
+                ) : null}
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <FormField label="Profile image" id="profileImage">
+                    <FileUploaderField
+                      id="profileImage"
+                      fileName={form.profileImage}
+                      onChange={handleFile("profileImage")}
+                    />
+                  </FormField>
+                </div>
 
-          <FormField label="Aadhar card" id="aadharCard">
-            <Input
-              id="aadharCard"
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
-              onChange={handleFile("aadharCard")}
-            />
-            {form.aadharCard ? (
-              <p className="text-xs text-ex-muted">{form.aadharCard}</p>
-            ) : null}
-          </FormField>
+                <div className="space-y-2">
+                  <FormField label="Postion" id="position">
+                    <Select
+                      id="position"
+                      value={form.position}
+                      onChange={update("position")}
+                      required
+                    >
+                      <option value="">Select Position</option>
+                      {[
+                        { value: POSITIONS.TRAINEE, label: "Trainee" },
+                        { value: POSITIONS.FRONTEND_DEVELOPER, label: "Frontend Developer" },
+                        { value: POSITIONS.SENIOR_FRONTEND_DEVELOPER, label: "Senior Frontend Developer" },
+                        { value: POSITIONS.BACKEND_DEVELOPER, label: "Backend Developer" },
+                        { value: POSITIONS.SENIOR_BACKEND_DEVELOPER, label: "Senior Backend Developer" },
+                        { value: POSITIONS.FULLSTACK_DEVELOPER, label: "Fullstack Developer" },
+                        { value: POSITIONS.SENIOR_FULLSTACK_DEVELOPER, label: "Senior Fullstack Developer" },
+                        { value: POSITIONS.HR_MANAGER, label: "HR Manager" },
+                        { value: POSITIONS.TEAM_LEAD, label: "Team Lead" },
+                        { value: POSITIONS.CEO, label: "CEO" },
+                        { value: POSITIONS.OTHER, label: "Other" }
+                      ].map((position) => (
+                        <option key={position.value} value={position.value}>{position.label}</option>
+                      ))}
+                    </Select>
+                  </FormField>
+                </div>
 
-          <FormField label="Marksheet" id="marksheet" className="sm:col-span-2">
-            <Input
-              id="marksheet"
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
-              onChange={handleFile("marksheet")}
-            />
-            {form.marksheet ? (
-              <p className="text-xs text-ex-muted">{form.marksheet}</p>
-            ) : null}
-          </FormField>
-        </CardContent>
-      </Card>
+                <div className="space-y-2">
+                  <FormField label="Email" id="email">
+                    <Input
+                      id="email"
+                      value={form.email}
+                      onChange={update("email")}
+                      placeholder="Employee Email"
+                    />
+                  </FormField>
+                </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Parent / guardian information</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Textarea
-            id="parentGuardian"
-            value={form.parentGuardian}
-            onChange={update("parentGuardian")}
-            placeholder="Name, relationship, contact number, address…"
-            rows={4}
-          />
-        </CardContent>
-      </Card>
+                <div className="space-y-2">
+                  <FormField label="Contact number" id="contactNumber">
+                    <IndianPhoneInput
+                      id="contactNumber"
+                      value={form.contactNumber}
+                      onChange={(value) => setForm((prev) => ({ ...prev, contactNumber: value }))}
+                      placeholder="Employee Contact Number"
+                    />
+                  </FormField>
+                </div>
 
-      {error ? (
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-      ) : null}
+                <div className="space-y-2">
+                  <FormField label="Experience" id="experience">
+                    <Input
+                      id="experience"
+                      type="number"
+                      value={form.experience}
+                      onChange={update("experience")}
+                      placeholder="Years of experience"
+                    />
+                  </FormField>
+                </div>
+
+                <div className="space-y-2">
+                  <FormField label="Joining date" id="joiningDate">
+                    <DateInput
+                      id="joiningDate"
+                      value={form.joiningDate}
+                      onChange={(joiningDate) =>
+                        setForm((prev) => ({ ...prev, joiningDate }))
+                      }
+                    />
+                  </FormField>
+                </div>
+
+                <div className="space-y-2">
+                  <FormField label="Last increment date" id="lastIncrementDate">
+                    <DateInput
+                      id="lastIncrementDate"
+                      value={form.lastIncrementDate}
+                      onChange={(lastIncrementDate) =>
+                        setForm((prev) => ({ ...prev, lastIncrementDate }))
+                      }
+                    />
+                  </FormField>
+                </div>
+
+                <FormField label="Tech skills" id="skills" className="sm:col-span-2">
+                  <MultiSelect
+                    id="skills"
+                    options={[...ALL_TECH_SKILLS]}
+                    value={parseSkillsValue(form.skills)}
+                    onChange={(skills) =>
+                      setForm((prev) => ({ ...prev, skills: joinSkillsValue(skills) }))
+                    }
+                    placeholder="Select tech skills"
+                  />
+                </FormField>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
 
       <div className="flex flex-wrap gap-2">
         <Button

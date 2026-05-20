@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import type { SheetPagination } from "@/lib/sheetPagination";
+import type { SheetPagination } from "@/types/sheet";
 
 export function Pagination({
   pagination,

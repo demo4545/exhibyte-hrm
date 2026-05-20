@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 const links = [
   {
     title: "Google Drive",
-    desc: "Service account + shared drive for Excel templates and employee documents.",
+    desc: "Connect personal Gmail for document uploads (required for My Drive).",
     href: "/integrations/google-drive",
   },
   {
@@ -38,9 +38,11 @@ export default function IntegrationsHubPage() {
             </CardHeader>
             <CardContent className="flex flex-1 flex-col justify-between gap-4">
               <p className="text-sm text-ex-muted">{l.desc}</p>
-              <Button variant="outline" size="sm" asChild>
-                <Link href={l.href}>Open</Link>
-              </Button>
+              <Link href={l.href}>
+                <Button variant="outline" size="sm" type="button">
+                  Open
+                </Button>
+              </Link>
             </CardContent>
           </Card>
         ))}

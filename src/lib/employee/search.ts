@@ -1,7 +1,7 @@
-import { headerToKey } from "@/lib/sheetSort";
+import { headerToKey } from "./sort";
 
 /** Normalized column keys searched by the employee directory */
-export const EMPLOYEE_SEARCH_KEYS = ["name", "role", "tech_skills"] as const;
+export const EMPLOYEE_SEARCH_KEYS = ["name", "role", "skills"] as const;
 
 export function filterSheetBySearch(
   data: string[][],
