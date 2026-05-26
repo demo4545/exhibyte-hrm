@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Pencil, Plus, Search } from "lucide-react";
+import { Pencil, Search, User } from "lucide-react";
 
 import { PageHeader } from "@/components/ui/page-header";
 import { DataTable } from "@/components/ui/data-table";
@@ -36,9 +36,26 @@ function buildListColumns(canManage: boolean): Column<EmployeeRow>[] {
       header,
       sortable,
       ...(key === "profileImage" && {
-        render: (row: EmployeeRow) => (
-          <img src={resolveProfileImageSrc(row.profileImage) ?? ""} alt="Profile" className="size-10 rounded-full border border-ex-border object-cover" />
-        ),
+        render: (row: EmployeeRow) => {
+          const src = resolveProfileImageSrc(row.profileImage);
+          if (!src) {
+            return (
+              <span
+                className="inline-flex size-10 items-center justify-center rounded-full border border-ex-border bg-ex-surface text-ex-muted"
+                aria-label="No profile photo"
+              >
+                <User className="size-5" />
+              </span>
+            );
+          }
+          return (
+            <img
+              src={src}
+              alt="Profile"
+              className="size-10 rounded-full border border-ex-border object-cover"
+            />
+          );
+        },
       }),
       ...(key === "status" && {
         render: (row: EmployeeRow) => (
@@ -178,17 +195,6 @@ export default function EmployeeDirectoryPage() {
       <PageHeader
         title="All Employees"
         description="View and manage all employees in the organization."
-        actions={
-          (user?.role === ROLES.HR_MANAGER ||
-            user?.role === ROLES.SUPER_ADMIN) && (
-            <Link href="/employee/new">
-              <Button variant="secondary" size="sm">
-                <Plus className="size-4" />
-                Add employee
-              </Button>
-            </Link>
-          )
-        }
       />
 
       <div className="space-y-4">

@@ -22,6 +22,8 @@ export const initialEmployeeForm = {
   position: "",
   email: "",
   contactNumber: "",
+  lastWorkingDay: "",
+  offboardReason: "",
 };
 
 export type EmployeeFormState = {
@@ -51,6 +53,8 @@ const SHEET_KEY_TO_FORM: Record<string, keyof EmployeeFormState> = {
   last_increment_date: "lastIncrementDate",
   marksheet: "marksheet",
   documents_folder_id: "documentsFolderId",
+  last_working_day: "lastWorkingDay",
+  offboard_reason: "offboardReason",
 };
 
 /** Normalize sheet header for form lookup (camelCase, spaces → snake_case). */
@@ -110,6 +114,8 @@ export function sheetRowToForm(
     profileImage: "",
     email: "",
     contactNumber: "",
+    lastWorkingDay: "",
+    offboardReason: "",
     status: STATUS.ACTIVE,
   };
 

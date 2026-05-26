@@ -37,6 +37,21 @@ export function getEmployeeNameFromRow(
   return name || String(row[0] ?? "").trim() || "Employee";
 }
 
+/** Read employee ID from a sheet row; falls back to sheet row index when missing. */
+export function getEmployeeIdFromRow(
+  headers: string[],
+  row: string[],
+  sheetRow?: number,
+): string {
+  const idIndex = headers.findIndex((h) => headerToFormKey(h) === "employeeId");
+  const id = idIndex >= 0 ? String(row[idIndex] ?? "").trim() : "";
+  if (id) return id;
+  if (sheetRow != null && sheetRow >= 2) {
+    return `EMP${String(sheetRow - 1).padStart(3, "0")}`;
+  }
+  return "";
+}
+
 /** Build A1 range for a single sheet row (e.g. Sheet1!A5:L5) */
 export function sheetRowToRange(sheetRow: number, columnCount: number): string {
   const endColumn = columnIndexToLetter(columnCount);

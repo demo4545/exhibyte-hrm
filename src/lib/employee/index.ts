@@ -15,6 +15,7 @@ export {
   getSheetHeaders,
   mergeRowWithFormFields,
   getEmployeeNameFromRow,
+  getEmployeeIdFromRow,
   sheetRowToRange,
 } from "./headers";
 
@@ -40,4 +41,4 @@ export {
   resolveProfileImageSrc,
 } from "./documents";
 
-export { pickSheetRowFields } from "./list";
+export { parseEmployeeListApiResponse, pickSheetRowFields } from "./list";

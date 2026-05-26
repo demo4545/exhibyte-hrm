@@ -21,6 +21,7 @@ import {
     sheetRowToRange,
     generateEmployeeId,
     getEmployeeNameFromRow,
+    getEmployeeIdFromRow,
     headerToFormKey,
     mergeRowWithFormFields,
 } from "@/lib/employee";
@@ -266,7 +267,7 @@ export async function PUT(req: NextRequest) {
             const docColIndex = headers.findIndex(
                 (h) => headerToFormKey(h) === "documentsFolderId",
             );
-            const documentsFolderId =
+            let documentsFolderId =
                 docColIndex >= 0
                     ? String(payload.values[docColIndex] ?? "").trim()
                     : "";
@@ -275,14 +276,45 @@ export async function PUT(req: NextRequest) {
 
             if (Object.keys(payload.files).length > 0) {
                 if (!documentsFolderId) {
-                    return NextResponse.json(
-                        {
-                            success: false,
-                            message:
-                                "Documents folder not found for this employee",
-                        },
-                        { status: 400 },
+                    const employeeId = getEmployeeIdFromRow(
+                        headers,
+                        payload.values,
+                        sheetRow,
                     );
+                    if (!employeeId) {
+                        return NextResponse.json(
+                            {
+                                success: false,
+                                message:
+                                    "Employee ID is required to create a documents folder",
+                            },
+                            { status: 400 },
+                        );
+                    }
+
+                    const employeeName = getEmployeeNameFromRow(
+                        headers,
+                        payload.values,
+                    );
+                    const folders = await createEmployeeFolderStructure(
+                        employeeId,
+                        employeeName,
+                    );
+                    documentsFolderId = folders.documentsFolderId ?? "";
+                    if (!documentsFolderId) {
+                        return NextResponse.json(
+                            {
+                                success: false,
+                                message:
+                                    "Failed to create employee documents folder",
+                            },
+                            { status: 500 },
+                        );
+                    }
+
+                    rowValues = mergeRowWithFormFields(headers, payload.values, {
+                        documentsFolderId,
+                    });
                 }
 
                 const documentLinks = await uploadEmployeeDocuments(
@@ -292,7 +324,7 @@ export async function PUT(req: NextRequest) {
 
                 rowValues = mergeRowWithFormFields(
                     headers,
-                    payload.values,
+                    rowValues,
                     documentLinks,
                 );
             }

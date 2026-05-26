@@ -16,8 +16,7 @@ import {
   sheetRowToForm,
   type EmployeeFormState,
 } from "@/lib/employee";
-import { EyeIcon, EyeOffIcon } from "lucide-react";
-import { POSITIONS, ROLES, STATUS } from "@/app/consts/common";
+import { POSITIONS, ROLES } from "@/app/consts/common";
 import {
   ALL_TECH_SKILLS,
   joinSkillsValue,
@@ -226,14 +225,6 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     await saveEmployee(form);
-  };
-
-  const handleStatusChange = async () => {
-    const nextStatus =
-      form.status === STATUS.ACTIVE ? STATUS.INACTIVE : STATUS.ACTIVE;
-    const updatedForm = { ...form, status: nextStatus };
-    setForm(updatedForm);
-    await saveEmployee(updatedForm);
   };
 
   if (loading) {
@@ -510,13 +501,6 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
               : "Add employee"}
 
         </Button>
-
-        {
-          isEdit && <Button onClick={handleStatusChange} variant={form.status === STATUS.ACTIVE ? "danger" : "primary"}>
-            {form.status === STATUS.ACTIVE ? STATUS.INACTIVE : STATUS.ACTIVE}
-            {form.status === STATUS.ACTIVE ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
-          </Button>
-        }
 
         <Link href="/employee">
           <Button type="button" variant="ghost" disabled={submitting}>
