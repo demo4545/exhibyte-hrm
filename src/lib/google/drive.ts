@@ -75,7 +75,11 @@ export async function uploadEmployeeDocuments(
     return links;
 }
 
-const DOCUMENTS_ROOT_FOLDER_NAME = "documents";
+/** Root under {@link HRM_FOLDER_ID}: `HRM/Employees/{employeeId}_{name}/documents/`. */
+const EMPLOYEES_ROOT_FOLDER_NAME = "Employees";
+
+/** Previous root folder name; still resolved if present (rename in Drive or rely on lookup). */
+const LEGACY_EMPLOYEES_ROOT_FOLDER_NAME = "documents";
 
 export const createFolder = async (name: string, parentFolderId?: string) => {
     const drive = await getDrive();
@@ -97,10 +101,10 @@ export const createFolder = async (name: string, parentFolderId?: string) => {
     }
 };
 
-async function getOrCreateFolder(
+async function findFolder(
     name: string,
     parentFolderId: string,
-): Promise<string> {
+): Promise<string | null> {
     const drive = await getDrive();
 
     const query = [
@@ -110,15 +114,22 @@ async function getOrCreateFolder(
         `'${parentFolderId}' in parents`,
     ].join(" and ");
 
-    try {
-        const list = await drive.files.list({
-            q: query,
-            fields: "files(id)",
-            pageSize: 1,
-            ...SHARED_DRIVE_OPTIONS,
-        });
+    const list = await drive.files.list({
+        q: query,
+        fields: "files(id)",
+        pageSize: 1,
+        ...SHARED_DRIVE_OPTIONS,
+    });
 
-        const existingId = list.data.files?.[0]?.id;
+    return list.data.files?.[0]?.id ?? null;
+}
+
+async function getOrCreateFolder(
+    name: string,
+    parentFolderId: string,
+): Promise<string> {
+    try {
+        const existingId = await findFolder(name, parentFolderId);
         if (existingId) return existingId;
 
         const created = await createFolder(name, parentFolderId);
@@ -131,14 +142,25 @@ async function getOrCreateFolder(
     }
 }
 
+/** Employees root: prefers `Employees`, falls back to legacy `documents` folder. */
+async function getOrCreateEmployeesRootFolder(): Promise<string> {
+    const preferred = await findFolder(EMPLOYEES_ROOT_FOLDER_NAME, HRM_FOLDER_ID);
+    if (preferred) return preferred;
+
+    const legacy = await findFolder(
+        LEGACY_EMPLOYEES_ROOT_FOLDER_NAME,
+        HRM_FOLDER_ID,
+    );
+    if (legacy) return legacy;
+
+    return getOrCreateFolder(EMPLOYEES_ROOT_FOLDER_NAME, HRM_FOLDER_ID);
+}
+
 export const createEmployeeFolderStructure = async (
     employeeId: string,
     employeeName: string,
 ) => {
-    const documentsRootId = await getOrCreateFolder(
-        DOCUMENTS_ROOT_FOLDER_NAME,
-        HRM_FOLDER_ID,
-    );
+    const documentsRootId = await getOrCreateEmployeesRootFolder();
 
     const employeeFolderName = `${employeeId}_${employeeName}`;
     const employeeFolderId = await getOrCreateFolder(

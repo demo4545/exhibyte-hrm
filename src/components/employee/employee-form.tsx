@@ -7,12 +7,15 @@ import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
   EMPLOYEE_DOCUMENT_FIELDS,
   formToSheetRow,
   initialEmployeeForm,
+  maskAadhar,
+  maskPan,
   sheetRowToForm,
   type EmployeeFormState,
 } from "@/lib/employee";
@@ -203,6 +206,25 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
           setError(result.message || String(result.documentWarning));
           return;
         }
+
+        const credentials = result.credentials as
+          | { username?: string; initialPassword?: string }
+          | undefined;
+        if (
+          !isEdit &&
+          credentials &&
+          (credentials.username || credentials.initialPassword)
+        ) {
+          const lines = [
+            "Employee saved. Share these sign-in details once (they are stored encrypted in the sheet):",
+            credentials.username ? `Username: ${credentials.username}` : null,
+            credentials.initialPassword
+              ? `Password: ${credentials.initialPassword}`
+              : null,
+          ].filter(Boolean);
+          window.alert(lines.join("\n"));
+        }
+
         router.push("/employee");
         return;
       }
@@ -293,7 +315,38 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
               <CardTitle>Documents</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
-              <FormField label="Pancard" id="pancard">
+              <FormField label="PAN number" id="panNumber">
+                <Input
+                  id="panNumber"
+                  value={form.panNumber}
+                  onChange={update("panNumber")}
+                  placeholder="AAAAA9999A"
+                  autoComplete="off"
+                />
+                {form.panNumber ? (
+                  <p className="text-xs text-ex-muted">
+                    Displayed as {maskPan(form.panNumber)}
+                  </p>
+                ) : null}
+              </FormField>
+
+              <FormField label="Aadhaar number" id="aadharNumber">
+                <Input
+                  id="aadharNumber"
+                  value={form.aadharNumber}
+                  onChange={update("aadharNumber")}
+                  placeholder="12-digit Aadhaar"
+                  inputMode="numeric"
+                  autoComplete="off"
+                />
+                {form.aadharNumber ? (
+                  <p className="text-xs text-ex-muted">
+                    Displayed as {maskAadhar(form.aadharNumber)}
+                  </p>
+                ) : null}
+              </FormField>
+
+              <FormField label="PAN card (upload)" id="pancard">
                 <FileUploaderField
                   id="pancard"
                   fileName={form.pancard}
@@ -301,7 +354,7 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
                 />
               </FormField>
 
-              <FormField label="Aadhar card" id="aadharCard">
+              <FormField label="Aadhaar card (upload)" id="aadharCard">
                 <FileUploaderField
                   id="aadharCard"
                   fileName={form.aadharCard}
@@ -418,10 +471,45 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
                   <FormField label="Email" id="email">
                     <Input
                       id="email"
+                      type="email"
                       value={form.email}
                       onChange={update("email")}
-                      placeholder="Employee Email"
+                      placeholder="Work email (used for sign-in)"
+                      required
                     />
+                  </FormField>
+                </div>
+
+                <div className="space-y-2">
+                  <FormField label="Username" id="username">
+                    <Input
+                      id="username"
+                      value={form.username}
+                      onChange={update("username")}
+                      placeholder="Optional sign-in username"
+                      autoComplete="off"
+                    />
+                  </FormField>
+                </div>
+
+                <div className="space-y-2">
+                  <FormField label="Password" id="password">
+                    <PasswordInput
+                      id="password"
+                      value={form.password}
+                      onChange={update("password")}
+                      placeholder={
+                        isEdit
+                          ? "Leave blank to keep current password"
+                          : "Leave blank to auto-generate (stored encrypted)"
+                      }
+                      autoComplete="new-password"
+                    />
+                    <p className="text-xs text-ex-muted">
+                      {isEdit
+                        ? "Passwords are stored encrypted in the sheet. Enter a new value only to change it."
+                        : "Saved as bcrypt in Google Sheets — never stored as plain text. Leave empty for a secure auto-generated password."}
+                    </p>
                   </FormField>
                 </div>
 

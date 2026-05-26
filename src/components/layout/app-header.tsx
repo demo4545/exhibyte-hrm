@@ -34,7 +34,7 @@ export function AppHeader() {
 
         <div className="hidden text-right sm:block">
           <p className="text-sm font-medium leading-tight text-ex-primary">{user?.name}</p>
-          <p className="text-xs text-ex-muted">{user?.department}</p>
+          <p className="text-xs text-ex-muted capitalize">{user?.department?.split('_').join(' ')}</p>
         </div>
         <Badge variant="accent" className="hidden capitalize sm:inline-flex">
           {user?.role ? roleLabel[user.role] ?? user.role : ""}

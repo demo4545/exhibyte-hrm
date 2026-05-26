@@ -9,6 +9,7 @@ export {
   formToSheetRow,
   sheetRowToForm,
   normalizeStatus,
+  isEmployeeStatusActive,
 } from "./form";
 
 export {
@@ -30,6 +31,7 @@ export type { IndexedSheetRow } from "./process";
 export {
   indexSheetBody,
   indexedRowsToSheetData,
+  isIndexedRowInactive,
   processEmployeeSheet,
 } from "./process";
 
@@ -37,8 +39,18 @@ export {
   EMPLOYEE_DOCUMENT_FIELDS,
   type EmployeeDocumentField,
   getDocumentDisplayName,
+  getDocumentHref,
   parseGoogleDriveFileId,
   resolveProfileImageSrc,
 } from "./documents";
 
+export { EMPLOYEE_LIST_PUBLIC_FIELDS } from "./list-fields";
 export { parseEmployeeListApiResponse, pickSheetRowFields } from "./list";
+export { maskAadhar, maskPan } from "./mask";
+
+export {
+  formatSheetTimestamp,
+  sheetTimestampsForCreate,
+  sheetTimestampsForUpdate,
+  withSheetRowUpdatedAt,
+} from "./timestamps";

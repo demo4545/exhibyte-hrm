@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Pencil, Search, User } from "lucide-react";
+import { Eye, Pencil, Search, User } from "lucide-react";
 
 import { PageHeader } from "@/components/ui/page-header";
 import { DataTable } from "@/components/ui/data-table";
@@ -95,14 +95,22 @@ function buildListColumns(canManage: boolean): Column<EmployeeRow>[] {
       header: "Actions",
       sortable: false,
       sticky: "right",
-      className: "min-w-[5.5rem]",
+      className: "min-w-[9rem]",
       render: (row: EmployeeRow) => (
-        <Link href={`/employee/${row.id}/edit`}>
-          <Button variant="ghost" size="sm" type="button">
-            <Pencil className="size-3.5" />
-            Edit
-          </Button>
-        </Link>
+        <div className="flex items-center gap-1">
+          <Link href={`/employee/${row.id}/profile`}>
+            <Button variant="ghost" size="sm" type="button">
+              <Eye className="size-3.5" />
+              View
+            </Button>
+          </Link>
+          <Link href={`/employee/${row.id}/edit`}>
+            <Button variant="ghost" size="sm" type="button">
+              <Pencil className="size-3.5" />
+              Edit
+            </Button>
+          </Link>
+        </div>
       ),
     },
   ];
@@ -121,6 +129,9 @@ export default function EmployeeDirectoryPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [pagination, setPagination] = useState<SheetPagination>(emptyPagination);
+
+  const canManage =
+    user?.role === ROLES.HR_MANAGER || user?.role === ROLES.SUPER_ADMIN;
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -152,9 +163,6 @@ export default function EmployeeDirectoryPage() {
         const pageInfo: SheetPagination = result.pagination ?? emptyPagination;
         const sheetRows: number[] = result.sheetRows ?? [];
 
-        const canManage =
-          user?.role === ROLES.HR_MANAGER || user?.role === ROLES.SUPER_ADMIN;
-
         const formattedData = dataRows.map((row: string[], index: number) => ({
           id: String(sheetRows[index] ?? index + 1),
           ...pickSheetRowFields(headers, row, LIST_FIELD_KEYS),
@@ -169,7 +177,14 @@ export default function EmployeeDirectoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [sortBy, sortOrder, page, debouncedSearch, statusFilter, user?.role]);
+  }, [sortBy, sortOrder, page, debouncedSearch, statusFilter, canManage]);
+
+  useEffect(() => {
+    if (!canManage && statusFilter === STATUS.INACTIVE) {
+      setStatusFilter("");
+      setPage(1);
+    }
+  }, [canManage, statusFilter]);
 
   useEffect(() => {
     void fetchEmployees();
@@ -211,20 +226,22 @@ export default function EmployeeDirectoryPage() {
             />
           </div>
 
-          <div className="w-full space-y-2 sm:w-44">
-            <Select
-              id="status-filter"
-              value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(e.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="">All Status</option>
-              <option value={STATUS.ACTIVE}>{STATUS.ACTIVE}</option>
-              <option value={STATUS.INACTIVE}>{STATUS.INACTIVE}</option>
-            </Select>
-          </div>
+          {canManage ? (
+            <div className="w-full space-y-2 sm:w-44">
+              <Select
+                id="status-filter"
+                value={statusFilter}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">All Status</option>
+                <option value={STATUS.ACTIVE}>{STATUS.ACTIVE}</option>
+                <option value={STATUS.INACTIVE}>{STATUS.INACTIVE}</option>
+              </Select>
+            </div>
+          ) : null}
         </div>
 
         <DataTable

@@ -1,4 +1,5 @@
 import { STATUS } from "@/app/consts/common";
+import { isEmployeeStatusActive } from "./form";
 import { getSheetHeaders } from "./headers";
 import { EMPLOYEE_SEARCH_KEYS } from "./search";
 import { headerToKey, type SortOrder } from "./sort";
@@ -61,6 +62,28 @@ function matchesStatus(cellValue: string, filter: string): boolean {
   }
 
   return cell === target;
+}
+
+/** Hide inactive rows for viewers who are not HR / super admin. */
+export function filterIndexedRowsActiveOnly(
+  headers: string[],
+  rows: IndexedSheetRow[],
+): IndexedSheetRow[] {
+  const statusColIndex = headers.map(headerToKey).indexOf("status");
+  if (statusColIndex === -1) return rows;
+
+  return rows.filter((row) =>
+    isEmployeeStatusActive(String(row.values[statusColIndex] ?? "")),
+  );
+}
+
+export function isIndexedRowInactive(
+  headers: string[],
+  row: IndexedSheetRow,
+): boolean {
+  const statusColIndex = headers.map(headerToKey).indexOf("status");
+  if (statusColIndex === -1) return false;
+  return !isEmployeeStatusActive(String(row.values[statusColIndex] ?? ""));
 }
 
 function filterIndexedRowsByStatus(
@@ -138,6 +161,8 @@ export function processEmployeeSheet(params: {
   order?: SortOrder;
   page?: number;
   pageSize?: number;
+  /** When true, inactive employees are omitted (non–HR / non–super-admin lists). */
+  excludeInactive?: boolean;
 }): {
   data: string[][];
   sheetRows: number[];
@@ -151,10 +176,14 @@ export function processEmployeeSheet(params: {
     order = "asc",
     page = 1,
     pageSize = DEFAULT_PAGE_SIZE,
+    excludeInactive = false,
   } = params;
 
   let { headers, rows } = indexSheetBody(data);
   rows = filterIndexedRows(headers, rows, search);
+  if (excludeInactive) {
+    rows = filterIndexedRowsActiveOnly(headers, rows);
+  }
   rows = filterIndexedRowsByStatus(headers, rows, status);
   rows = sortIndexedRows(headers, rows, sortBy, order);
 

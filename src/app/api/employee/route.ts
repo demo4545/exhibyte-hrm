@@ -7,7 +7,8 @@ import {
     updateSheetRow,
     clearSheetRange,
     getEmployeeCount,
-    getSheetHeadersData
+    getSheetHeadersData,
+    EMPLOYEE_SHEET_RANGE,
 } from "@/lib/google/sheets";
 import {
     createEmployeeFolderStructure,
@@ -23,8 +24,23 @@ import {
     getEmployeeNameFromRow,
     getEmployeeIdFromRow,
     headerToFormKey,
+    isEmployeeStatusActive,
     mergeRowWithFormFields,
+    sheetTimestampsForCreate,
+    withSheetRowUpdatedAt,
 } from "@/lib/employee";
+import {
+    filterEmployeeRowForViewer,
+    filterEmployeeSheetForViewer,
+} from "@/lib/employee/list-access";
+import { withActiveSession } from "@/lib/auth/api-guard";
+import { canManageEmployees } from "@/lib/auth/server";
+import { prepareEmployeeCredentialsForSave } from "@/lib/auth/credentials-setup";
+import {
+    applyPasswordToRowValues,
+    redactPasswordFromRow,
+    redactPasswordsFromSheetData,
+} from "@/lib/auth/row-credentials";
 import {
     filesToUploadBuffers,
     parseEmployeeSubmit,
@@ -37,12 +53,13 @@ import {
  * Example:
  * /api/sheet?range=Sheet1!A1:E20
  */
-export async function GET(req: NextRequest) {
+export const GET = withActiveSession(async (req, user) => {
     try {
+        const canViewFullDetails = canManageEmployees(user.role);
         const { searchParams } = new URL(req.url);
 
         const range =
-            searchParams.get("range") || "Sheet1!A1:Z1000";
+            searchParams.get("range") || EMPLOYEE_SHEET_RANGE;
 
         const sortBy = searchParams.get("sortBy");
         const orderParam = searchParams.get("order");
@@ -62,10 +79,19 @@ export async function GET(req: NextRequest) {
 
         if (headersOnly) {
             const headerRow = await readSheet("Sheet1!1:1");
-            const headers = getSheetHeaders(headerRow.length ? headerRow : [[]]);
+            const sheetData = headerRow.length ? headerRow : [[]];
+            const filtered = filterEmployeeSheetForViewer(
+                sheetData,
+                canViewFullDetails,
+            );
+            const headers = getSheetHeaders(filtered);
 
             return NextResponse.json(
-                { success: true, headers },
+                {
+                    success: true,
+                    headers,
+                    view: canViewFullDetails ? "full" : "limited",
+                },
                 { status: 200 },
             );
         }
@@ -82,12 +108,36 @@ export async function GET(req: NextRequest) {
             }
 
             const headers = getSheetHeaders(raw);
+            const row = raw[sheetRow - 1] ?? [];
+
+            if (!canViewFullDetails) {
+                const statusColIndex = headers
+                    .map(headerToFormKey)
+                    .indexOf("status");
+                if (
+                    statusColIndex >= 0 &&
+                    !isEmployeeStatusActive(String(row[statusColIndex] ?? ""))
+                ) {
+                    return NextResponse.json(
+                        { success: false, message: "Employee not found" },
+                        { status: 404 },
+                    );
+                }
+            }
+
+            const safeRow = redactPasswordFromRow(headers, row);
+            const filtered = filterEmployeeRowForViewer(
+                headers,
+                safeRow,
+                canViewFullDetails,
+            );
             return NextResponse.json(
                 {
                     success: true,
-                    headers,
-                    row: raw[sheetRow - 1] ?? [],
+                    headers: filtered.headers,
+                    row: filtered.row,
                     sheetRow,
+                    view: canViewFullDetails ? "full" : "limited",
                 },
                 { status: 200 },
             );
@@ -101,17 +151,25 @@ export async function GET(req: NextRequest) {
             order,
             page,
             pageSize,
+            excludeInactive: !canViewFullDetails,
         });
+
+        const safeData = redactPasswordsFromSheetData(data);
+        const filteredData = filterEmployeeSheetForViewer(
+            safeData,
+            canViewFullDetails,
+        );
 
         return NextResponse.json(
             {
                 success: true,
-                data,
+                data: filteredData,
                 sheetRows,
                 pagination,
                 sort: sortBy ? { sortBy, order } : null,
                 search: search || null,
                 status: status || null,
+                view: canViewFullDetails ? "full" : "limited",
             },
             { status: 200 }
         );
@@ -126,7 +184,7 @@ export async function GET(req: NextRequest) {
             { status: 500 }
         );
     }
-}
+});
 
 /**
  * POST
@@ -140,7 +198,7 @@ export async function GET(req: NextRequest) {
  * }
  */
 
-export async function POST(req: Request) {
+export const POST = withActiveSession(async (req) => {
     try {
         const { values, files } = await parseEmployeeSubmit(req);
 
@@ -165,10 +223,15 @@ export async function POST(req: Request) {
             throw new Error("Failed to create employee documents folder");
         }
 
-        const rowValues = mergeRowWithFormFields(headers, values, {
+        let rowValues = mergeRowWithFormFields(headers, values, {
             employeeId,
             documentsFolderId,
+            ...sheetTimestampsForCreate(),
         });
+        const prepared = await prepareEmployeeCredentialsForSave(headers, rowValues, {
+            isCreate: true,
+        });
+        rowValues = prepared.rowValues;
 
         await appendSheetRow([rowValues]);
 
@@ -184,10 +247,9 @@ export async function POST(req: Request) {
                 );
 
                 if (Object.keys(documentLinks).length > 0) {
-                    const rowWithDocs = mergeRowWithFormFields(
+                    const rowWithDocs = withSheetRowUpdatedAt(
                         headers,
-                        rowValues,
-                        documentLinks,
+                        mergeRowWithFormFields(headers, rowValues, documentLinks),
                     );
                     await updateSheetRow(
                         sheetRowToRange(newSheetRow, headers.length),
@@ -217,12 +279,21 @@ export async function POST(req: Request) {
             }
         }
 
+        const credentials =
+            prepared.generatedUsername || prepared.generatedPassword
+                ? {
+                      username: prepared.generatedUsername,
+                      initialPassword: prepared.generatedPassword,
+                  }
+                : undefined;
+
         return Response.json({
             success: true,
             message: documentWarning
                 ? `Employee saved, but documents could not be uploaded: ${documentWarning}`
                 : "Employee created successfully",
             documentWarning: documentWarning ?? null,
+            credentials,
         });
     } catch (error: any) {
         console.error(error);
@@ -237,7 +308,7 @@ export async function POST(req: Request) {
             }
         );
     }
-}
+});
 
 /**
  * PUT
@@ -251,7 +322,7 @@ export async function POST(req: Request) {
  *   ]
  * }
  */
-export async function PUT(req: NextRequest) {
+export const PUT = withActiveSession(async (req) => {
     try {
         const contentType = req.headers.get("content-type") ?? "";
         let range: string | undefined;
@@ -264,6 +335,11 @@ export async function PUT(req: NextRequest) {
             values = [payload.values];
 
             const headers = await getSheetHeadersData();
+            let existingRow: string[] | undefined;
+            if (sheetRow && sheetRow >= 2) {
+                const sheetData = await readSheet(EMPLOYEE_SHEET_RANGE);
+                existingRow = sheetData[sheetRow - 1];
+            }
             const docColIndex = headers.findIndex(
                 (h) => headerToFormKey(h) === "documentsFolderId",
             );
@@ -329,12 +405,33 @@ export async function PUT(req: NextRequest) {
                 );
             }
 
-            values = [rowValues];
+            const prepared = await prepareEmployeeCredentialsForSave(
+                headers,
+                rowValues,
+                { isCreate: false, existingRow },
+            );
+            values = [
+                withSheetRowUpdatedAt(headers, prepared.rowValues),
+            ];
         } else {
             const body = await req.json();
             range = body.range;
             values = body.values;
             sheetRow = body.sheetRow != null ? Number(body.sheetRow) : undefined;
+
+            if (sheetRow && values?.[0]) {
+                const headers = await getSheetHeadersData();
+                const sheetData = await readSheet(EMPLOYEE_SHEET_RANGE);
+                const existingRow = sheetData[sheetRow - 1];
+                const prepared = await prepareEmployeeCredentialsForSave(
+                    headers,
+                    values[0] as string[],
+                    { isCreate: false, existingRow },
+                );
+                values = [
+                    withSheetRowUpdatedAt(headers, prepared.rowValues),
+                ];
+            }
         }
 
         if (!values || !Array.isArray(values)) {
@@ -384,7 +481,7 @@ export async function PUT(req: NextRequest) {
             { status: 500 }
         );
     }
-}
+});
 
 /**
  * DELETE
@@ -395,7 +492,7 @@ export async function PUT(req: NextRequest) {
  *   "range": "Sheet1!A2:C10"
  * }
  */
-export async function DELETE(req: NextRequest) {
+export const DELETE = withActiveSession(async (req) => {
     try {
         const body = await req.json();
 
@@ -431,4 +528,4 @@ export async function DELETE(req: NextRequest) {
             { status: 500 }
         );
     }
-}
+});

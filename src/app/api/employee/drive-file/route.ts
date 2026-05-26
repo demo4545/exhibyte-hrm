@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
+import { withActiveSession } from "@/lib/auth/api-guard";
 import { formatDriveError, getDrive } from "@/lib/google/drive-auth";
 
 const SHARED_DRIVE_OPTIONS = {
@@ -8,7 +9,7 @@ const SHARED_DRIVE_OPTIONS = {
 
 const FILE_ID_PATTERN = /^[\w-]+$/;
 
-export async function GET(req: NextRequest) {
+export const GET = withActiveSession(async (req) => {
   const fileId = req.nextUrl.searchParams.get("fileId")?.trim();
 
   if (!fileId || !FILE_ID_PATTERN.test(fileId)) {
@@ -57,4 +58,4 @@ export async function GET(req: NextRequest) {
       { status: 500 },
     );
   }
-}
+});

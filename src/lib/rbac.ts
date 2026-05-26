@@ -36,7 +36,11 @@ export const navStructure: NavItem[] = [
         roles: [SUPER_ADMIN, HR_MANAGER, EMPLOYEE],
       },
       { label: "Onboarding / offboarding", href: "/employee/onboarding", roles: [SUPER_ADMIN, HR_MANAGER], },
-      { label: "Profile & documents", href: "/employee/profile", roles: [], },
+      {
+        label: "Employee profile",
+        href: "/employee/profile",
+        roles: [SUPER_ADMIN, HR_MANAGER, EMPLOYEE],
+      },
       { label: "Punch in / out", href: "/employee/punch", roles: [], },
       { label: "Daily tasks", href: "/employee/tasks", roles: [], },
       { label: "Overtime & approvals", href: "/employee/overtime", roles: [], },

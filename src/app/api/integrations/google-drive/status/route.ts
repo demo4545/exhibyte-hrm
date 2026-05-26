@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 
+import { withActiveSession } from "@/lib/auth/api-guard";
 import {
     isDriveOAuthConfigured,
     isDriveOAuthConnected,
 } from "@/lib/google/drive-auth";
 import { isDriveImpersonationEnabled } from "@/lib/google/auth";
 
-export async function GET() {
+export const GET = withActiveSession(async () => {
     const oauthConnected = await isDriveOAuthConnected();
 
     return NextResponse.json({
@@ -16,4 +17,4 @@ export async function GET() {
         impersonation: isDriveImpersonationEnabled(),
         driveReady: oauthConnected || isDriveImpersonationEnabled(),
     });
-}
+});

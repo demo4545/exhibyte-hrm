@@ -104,3 +104,18 @@ export function getDocumentDisplayName(
 
   return trimmed;
 }
+
+/** Open URL for a stored document (Drive proxy or direct http(s) link). */
+export function getDocumentHref(storedValue: string): string | null {
+  const trimmed = storedValue.trim();
+  if (!trimmed) return null;
+
+  const fileId = parseGoogleDriveFileId(trimmed);
+  if (fileId) return getDriveFileProxyUrl(fileId);
+
+  if (isGoogleDriveFileUrl(trimmed)) return null;
+
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+
+  return null;
+}

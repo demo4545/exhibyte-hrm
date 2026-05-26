@@ -5,6 +5,8 @@ export const initialEmployeeForm = {
   status: STATUS.ACTIVE,
   name: "",
   address: "",
+  panNumber: "",
+  aadharNumber: "",
   pancard: "",
   aadharCard: "",
   marksheet: "",
@@ -21,9 +23,13 @@ export const initialEmployeeForm = {
   profileImage: "",
   position: "",
   email: "",
+  username: "",
+  password: "",
   contactNumber: "",
   lastWorkingDay: "",
   offboardReason: "",
+  createdAt: "",
+  updatedAt: "",
 };
 
 export type EmployeeFormState = {
@@ -42,9 +48,20 @@ const SHEET_KEY_TO_FORM: Record<string, keyof EmployeeFormState> = {
   birthday_date: "birthdayDate",
   joining_date: "joiningDate",
   email: "email",
+  username: "username",
+  user_name: "username",
+  login_username: "username",
+  password: "password",
+  login_password: "password",
+  pwd: "password",
   contact_number: "contactNumber",
   profile_image: "profileImage",
   position: "position",
+  pan: "panNumber",
+  pan_number: "panNumber",
+  aadhaar: "aadharNumber",
+  aadhar_number: "aadharNumber",
+  aadhaar_number: "aadharNumber",
   pancard: "pancard",
   aadhar_card: "aadharCard",
   parent_name: "parentName",
@@ -54,7 +71,17 @@ const SHEET_KEY_TO_FORM: Record<string, keyof EmployeeFormState> = {
   marksheet: "marksheet",
   documents_folder_id: "documentsFolderId",
   last_working_day: "lastWorkingDay",
+  lastworkingday: "lastWorkingDay",
+  last_working_date: "lastWorkingDay",
   offboard_reason: "offboardReason",
+  offboarding_reason: "offboardReason",
+  offboardreason: "offboardReason",
+  off_board_reason: "offboardReason",
+  reason_for_offboarding: "offboardReason",
+  created_at: "createdAt",
+  createdat: "createdAt",
+  updated_at: "updatedAt",
+  updatedat: "updatedAt",
 };
 
 /** Normalize sheet header for form lookup (camelCase, spaces → snake_case). */
@@ -98,6 +125,8 @@ export function sheetRowToForm(
     documentsFolderId: "",
     name: "",
     address: "",
+    panNumber: "",
+    aadharNumber: "",
     pancard: "",
     aadharCard: "",
     marksheet: "",
@@ -113,9 +142,13 @@ export function sheetRowToForm(
     lastIncrementDate: "",
     profileImage: "",
     email: "",
+    username: "",
+    password: "",
     contactNumber: "",
     lastWorkingDay: "",
     offboardReason: "",
+    createdAt: "",
+    updatedAt: "",
     status: STATUS.ACTIVE,
   };
 
@@ -132,17 +165,53 @@ export function sheetRowToForm(
     form[formKey] = raw;
   });
 
+  applyOffboardFieldFallbacks(headers, row, form);
+
   return form;
+}
+
+/** Read offboard columns when the sheet header uses a variant we do not map directly. */
+function applyOffboardFieldFallbacks(
+  headers: string[],
+  row: string[],
+  form: EmployeeFormState,
+): void {
+  if (!form.lastWorkingDay.trim()) {
+    const lastDayIndex = findHeaderIndex(headers, (key) =>
+      key.includes("last") && key.includes("working"),
+    );
+    if (lastDayIndex >= 0) {
+      form.lastWorkingDay = String(row[lastDayIndex] ?? "").trim();
+    }
+  }
+
+  if (!form.offboardReason.trim()) {
+    const reasonIndex = findHeaderIndex(
+      headers,
+      (key) =>
+        (key.includes("offboard") && key.includes("reason")) ||
+        (key.includes("offboarding") && key.includes("reason")),
+    );
+    if (reasonIndex >= 0) {
+      form.offboardReason = String(row[reasonIndex] ?? "").trim();
+    }
+  }
+}
+
+function findHeaderIndex(
+  headers: string[],
+  matches: (normalizedKey: string) => boolean,
+): number {
+  return headers.findIndex((header) => matches(headerToSheetFormLookupKey(header)));
 }
 
 /** Map sheet status cell → form value (Active / Inactive) */
 export function normalizeStatus(value: string): string {
+  return isEmployeeStatusActive(value) ? STATUS.ACTIVE : STATUS.INACTIVE;
+}
+
+/** Only explicit Active allows sign-in and app access. */
+export function isEmployeeStatusActive(value: string): boolean {
   const v = value.trim().toLowerCase();
-  if (v === STATUS.INACTIVE.toLowerCase() || v === "inactive") {
-    return STATUS.INACTIVE;
-  }
-  if (v === STATUS.ACTIVE.toLowerCase() || v === "active") {
-    return STATUS.ACTIVE;
-  }
-  return value.trim() ? value.trim() : STATUS.ACTIVE;
+  return v === STATUS.ACTIVE.toLowerCase() || v === "active";
 }

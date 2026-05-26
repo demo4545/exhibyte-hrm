@@ -1,4 +1,4 @@
-import type { SessionUser, UserRole } from "@/types/auth";
+import type { SessionUser } from "@/types/auth";
 
 const COOKIE = "exhibyte_session";
 
@@ -33,53 +33,11 @@ export function decodeSession(raw: string): SessionUser | null {
   }
 }
 
-export { COOKIE };
-
-export const demoUsers: Record<
-  string,
-  { password: string; user: SessionUser }
-> = {
-  "admin@exhibyte.local": {
-    password: "demo",
-    user: {
-      id: "1",
-      email: "admin@exhibyte.local",
-      name: "Asha Verma",
-      role: "super_admin",
-      department: "Leadership",
-    },
-  },
-  "hr@exhibyte.local": {
-    password: "demo",
-    user: {
-      id: "2",
-      email: "hr@exhibyte.local",
-      name: "Rahul Mehta",
-      role: "hr",
-      department: "Human Resources",
-    },
-  },
-  "employee@exhibyte.local": {
-    password: "demo",
-    user: {
-      id: "3",
-      email: "employee@exhibyte.local",
-      name: "Neha Kapoor",
-      role: "employee",
-      department: "Engineering",
-    },
-  },
+/** Session cookie — cleared when the browser quits (no maxAge / expires). */
+export const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: "lax" as const,
+  path: "/",
 };
 
-export function resolveDemoLogin(
-  email: string,
-  password: string,
-  roleOverride?: UserRole,
-): SessionUser | null {
-  const entry = demoUsers[email.toLowerCase()];
-  if (!entry || entry.password !== password) return null;
-  if (roleOverride && entry.user.role !== roleOverride) {
-    return { ...entry.user, role: roleOverride };
-  }
-  return entry.user;
-}
+export { COOKIE };

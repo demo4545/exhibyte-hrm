@@ -9,4 +9,6 @@ export type SessionUser = {
   name: string;
   role: UserRole;
   department?: string;
+  /** 1-based row index in the employee Google Sheet */
+  sheetRow?: number;
 };

@@ -5,6 +5,10 @@ import {
 } from "@reduxjs/toolkit";
 
 import { ROLES, STATUS } from "@/app/consts/common";
+import {
+  isAccountInactiveRedirectError,
+  isAccountInactiveRedirectPending,
+} from "@/lib/account-inactive-client";
 import { parseEmployeeListApiResponse } from "@/lib/employee";
 import type { UserRole } from "@/types/auth";
 import type { Employee, EmployeeStatus } from "@/types/employee";
@@ -156,6 +160,12 @@ const employeeListSlice = createSlice({
       )
       .addCase(fetchEmployeeList.rejected, (state, action) => {
         state.loading = false;
+        if (
+          isAccountInactiveRedirectPending() ||
+          isAccountInactiveRedirectError(action.error)
+        ) {
+          return;
+        }
         state.error = action.error.message ?? "Failed to load employees";
       })
       .addCase(offboardEmployee.pending, (state) => {
@@ -172,6 +182,12 @@ const employeeListSlice = createSlice({
       })
       .addCase(offboardEmployee.rejected, (state, action) => {
         state.offboarding = false;
+        if (
+          isAccountInactiveRedirectPending() ||
+          isAccountInactiveRedirectError(action.error)
+        ) {
+          return;
+        }
         state.error = action.error.message ?? "Failed to offboard employee";
       });
   },

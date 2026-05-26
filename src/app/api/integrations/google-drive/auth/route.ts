@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 
+import { withActiveSession } from "@/lib/auth/api-guard";
 import { getDriveOAuthConsentUrl, isDriveOAuthConfigured } from "@/lib/google/drive-auth";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export const GET = withActiveSession(async () => {
     if (!isDriveOAuthConfigured()) {
         return NextResponse.json(
             {
@@ -25,4 +26,4 @@ export async function GET() {
     }
 
     return NextResponse.redirect(url);
-}
+});

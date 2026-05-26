@@ -1,19 +1,19 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 import { STATUS } from "@/app/consts/common";
-import { canManageEmployees, getSessionUser } from "@/lib/auth/server";
+import { withActiveSession } from "@/lib/auth/api-guard";
+import { canManageEmployees } from "@/lib/auth/server";
 import {
-  formToSheetRow,
   getSheetHeaders,
-  sheetRowToForm,
+  mergeRowWithFormFields,
   sheetRowToRange,
+  withSheetRowUpdatedAt,
 } from "@/lib/employee";
-import { readSheet, updateSheetRow } from "@/lib/google/sheets";
+import { EMPLOYEE_SHEET_RANGE, readSheet, updateSheetRow } from "@/lib/google/sheets";
 
-export async function POST(req: NextRequest) {
+export const POST = withActiveSession(async (req, user) => {
   try {
-    const user = await getSessionUser();
-    if (!user || !canManageEmployees(user.role)) {
+    if (!canManageEmployees(user.role)) {
       return NextResponse.json(
         { success: false, message: "You do not have permission to offboard employees." },
         { status: 403 },
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const raw = await readSheet("Sheet1!A1:Z1000");
+    const raw = await readSheet(EMPLOYEE_SHEET_RANGE);
     if (sheetRow > raw.length) {
       return NextResponse.json(
         { success: false, message: "Employee not found." },
@@ -56,13 +56,15 @@ export async function POST(req: NextRequest) {
 
     const headers = getSheetHeaders(raw);
     const row = raw[sheetRow - 1] ?? [];
-    const form = sheetRowToForm(headers, row);
 
-    form.status = STATUS.INACTIVE;
-    form.lastWorkingDay = lastWorkingDay;
-    form.offboardReason = reason;
-
-    const rowValues = formToSheetRow(form, headers);
+    const rowValues = withSheetRowUpdatedAt(
+      headers,
+      mergeRowWithFormFields(headers, row, {
+        status: STATUS.INACTIVE,
+        lastWorkingDay,
+        offboardReason: reason,
+      }),
+    );
     const updateRange = sheetRowToRange(sheetRow, headers.length);
     await updateSheetRow(updateRange, [rowValues]);
 
@@ -76,4 +78,4 @@ export async function POST(req: NextRequest) {
       error instanceof Error ? error.message : "Failed to offboard employee.";
     return NextResponse.json({ success: false, message }, { status: 500 });
   }
-}
+});
