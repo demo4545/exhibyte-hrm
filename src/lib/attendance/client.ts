@@ -35,6 +35,7 @@ export type AttendanceHistoryRow = {
   workingHours: string;
   overtime: string;
   status: string;
+  overtimeApproval?: string;
   earlyLeaveReason?: string;
   dailyUpdate?: string;
 };
@@ -57,6 +58,21 @@ export type CorrectionRequestDto = {
   remarks: string;
   approvedBy: string;
   approvedDate: string;
+  createdAt: string;
+};
+
+export type OvertimeRequestDto = {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  attendanceSpreadsheetId: string;
+  date: string;
+  overtime: string;
+  comment: string;
+  status: "Pending" | "Approved" | "Rejected";
+  remarks: string;
+  reviewedBy: string;
+  reviewedDate: string;
   createdAt: string;
 };
 
@@ -273,4 +289,40 @@ export async function reviewCorrection(
   });
   const data = await res.json();
   if (!data.success) throw new Error(data.message ?? "Failed to review correction");
+}
+
+export async function submitOvertimeRequest(body: {
+  date: string;
+  comment?: string;
+}): Promise<void> {
+  const res = await fetch("/api/attendance/overtime-requests", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.message ?? "Failed to submit overtime request");
+}
+
+export async function fetchOvertimeRequests(): Promise<OvertimeRequestDto[]> {
+  const res = await fetch("/api/attendance/overtime-requests", { credentials: "include" });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.message ?? "Failed to load overtime requests");
+  return data.requests ?? [];
+}
+
+export async function reviewOvertimeRequest(
+  id: string,
+  status: "Approved" | "Rejected",
+  remarks?: string,
+): Promise<void> {
+  const res = await fetch("/api/attendance/overtime-requests", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, status, remarks }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.message ?? "Failed to review overtime request");
 }

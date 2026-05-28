@@ -117,6 +117,7 @@ export const GET = withActiveSession(async (req, user) => {
           workingHours: r.workingHours,
           overtime: r.overtime,
           status: r.status,
+          overtimeApproval: r.isOvertimeApproved,
           earlyLeaveReason: r.earlyLeaveReason,
           dailyUpdate: r.dailyUpdate,
         })),

@@ -95,6 +95,7 @@ export const WORKING_STATUS = {
   ABSENT: "Absent",
   ON_LEAVE: "On Leave",
   OVERTIME_APPROVED: "Overtime Approved",
+  OVERTIME_REJECTED: "Overtime Rejected",
   OVERTIME_REQUESTED: "Overtime Requested",
 } as const;
 
@@ -134,5 +135,41 @@ export const CORRECTION_HEADERS = [
   "Remarks",
   "Approved By",
   "Approved Date",
+  "Created At",
+] as const;
+
+export const OVERTIME_APPROVAL = {
+  NOT_CONSIDERED: "Not considered",
+  PENDING: "Pending",
+  ACCEPTED: "Accepted",
+  REJECTED: "Rejected",
+} as const;
+
+export type OvertimeApprovalStatus =
+  (typeof OVERTIME_APPROVAL)[keyof typeof OVERTIME_APPROVAL];
+
+export const OVERTIME_REQUEST_STATUS = {
+  PENDING: "Pending",
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+} as const;
+
+export type OvertimeRequestStatus =
+  (typeof OVERTIME_REQUEST_STATUS)[keyof typeof OVERTIME_REQUEST_STATUS];
+
+export const OVERTIME_REQUEST_SHEET_TITLE = "OvertimeRequests";
+
+export const OVERTIME_REQUEST_HEADERS = [
+  "ID",
+  "Employee ID",
+  "Employee Name",
+  "Attendance Spreadsheet ID",
+  "Date",
+  "Overtime",
+  "Comment",
+  "Status",
+  "Remarks",
+  "Reviewed By",
+  "Reviewed Date",
   "Created At",
 ] as const;

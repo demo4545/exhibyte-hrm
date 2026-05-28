@@ -4,6 +4,7 @@ import {
   ATTENDANCE_LAST_COLUMN,
   EARLY_LEAVE_REASON_MIN_LENGTH,
   IMPORT_DEFAULT_BREAK,
+  OVERTIME_APPROVAL,
   WORK_MODE,
   WORK_MODE_OPTIONS,
   WORKING_STATUS,
@@ -332,7 +333,7 @@ function rowFromValues(values: string[], sheetRow: number): AttendanceRow {
     overtime: punchedOut ? metrics.overtime : "—",
     earlyLeaveReason: values[ATTENDANCE_COL.earlyLeaveReason] ?? "",
     dailyUpdate: values[ATTENDANCE_COL.dailyUpdate] ?? "",
-    isOvertimeApproved: values[ATTENDANCE_COL.isOvertimeApproved] ?? "Not considered",
+    isOvertimeApproved: values[ATTENDANCE_COL.isOvertimeApproved] ?? OVERTIME_APPROVAL.NOT_CONSIDERED,
   };
 }
 
@@ -644,9 +645,10 @@ async function applyOvertimeApprovalDropdownByTitle(
               condition: {
                 type: "ONE_OF_LIST",
                 values: [
-                  { userEnteredValue: "Accepted" },
-                  { userEnteredValue: "Rejected" },
-                  { userEnteredValue: "Not considered" },
+                  { userEnteredValue: OVERTIME_APPROVAL.ACCEPTED },
+                  { userEnteredValue: OVERTIME_APPROVAL.REJECTED },
+                  { userEnteredValue: OVERTIME_APPROVAL.PENDING },
+                  { userEnteredValue: OVERTIME_APPROVAL.NOT_CONSIDERED },
                 ],
               },
               strict: true,
@@ -930,7 +932,7 @@ function buildRowValues(existing: string[] | undefined, date: Date): string[] {
     base[ATTENDANCE_COL.workMode] = WORK_MODE.FULL_DAY_ONSITE;
   }
   if (!(base[ATTENDANCE_COL.isOvertimeApproved] ?? "").trim()) {
-    base[ATTENDANCE_COL.isOvertimeApproved] = "Not considered";
+    base[ATTENDANCE_COL.isOvertimeApproved] = OVERTIME_APPROVAL.NOT_CONSIDERED;
   }
   return base;
 }
@@ -1222,6 +1224,19 @@ export async function updateDailyUpdate(
     dateIso,
     "dailyUpdate",
     dailyUpdate.trim(),
+  );
+}
+
+export async function updateOvertimeApproval(
+  spreadsheetId: string,
+  dateIso: string,
+  overtimeApproval: string,
+): Promise<AttendanceRow> {
+  return updateAttendanceField(
+    spreadsheetId,
+    dateIso,
+    "isOvertimeApproved",
+    overtimeApproval.trim(),
   );
 }
 

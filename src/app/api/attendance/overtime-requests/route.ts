@@ -1,0 +1,150 @@
+import { NextResponse } from "next/server";
+
+import {
+  OVERTIME_REQUEST_STATUS,
+  WORKING_STATUS,
+} from "@/lib/attendance/constants";
+import {
+  createOvertimeRequest,
+  listOvertimeRequests,
+  reviewOvertimeRequest,
+} from "@/lib/attendance/overtime-requests";
+import { resolveAttendanceEmployee } from "@/lib/attendance/employee";
+import { getMonthAttendance } from "@/lib/google/attendance-sheets";
+import { withActiveSession } from "@/lib/auth/api-guard";
+import { canManageEmployees, canReviewOvertime } from "@/lib/auth/server";
+
+function isPositiveOvertime(value: string): boolean {
+  const overtime = value.trim();
+  if (!overtime || overtime === "—" || overtime.startsWith("-")) return false;
+  return /\d/.test(overtime);
+}
+
+export const GET = withActiveSession(async (_req, user) => {
+  try {
+    const canViewAll = canManageEmployees(user.role);
+    const employee = await resolveAttendanceEmployee(user);
+    const requests = await listOvertimeRequests(
+      canViewAll ? {} : { employeeId: employee?.employeeId },
+    );
+    return NextResponse.json({ success: true, requests });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to load overtime requests";
+    return NextResponse.json({ success: false, message }, { status: 500 });
+  }
+});
+
+export const POST = withActiveSession(async (req, user) => {
+  try {
+    const employee = await resolveAttendanceEmployee(user);
+    if (!employee?.attendanceSpreadsheetId) {
+      return NextResponse.json(
+        { success: false, message: "Employee attendance record not found" },
+        { status: 404 },
+      );
+    }
+
+    const body = await req.json();
+    const date = String(body.date ?? "").trim();
+    const comment = String(body.comment ?? "").trim();
+
+    if (!date) {
+      return NextResponse.json(
+        { success: false, message: "Date is required for overtime request" },
+        { status: 400 },
+      );
+    }
+
+    const [yearText, monthText] = date.split("-");
+    const year = parseInt(yearText ?? "", 10);
+    const month = parseInt(monthText ?? "", 10) - 1;
+    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 0 || month > 11) {
+      return NextResponse.json({ success: false, message: "Invalid date" }, { status: 400 });
+    }
+
+    const monthRows = await getMonthAttendance(employee.attendanceSpreadsheetId, year, month);
+    const target = monthRows.find((r) => r.date === date);
+    if (!target) {
+      return NextResponse.json(
+        { success: false, message: "Attendance record not found for selected date" },
+        { status: 404 },
+      );
+    }
+    if (!target.punchOut.trim()) {
+      return NextResponse.json(
+        { success: false, message: "Punch out is required before requesting overtime approval" },
+        { status: 400 },
+      );
+    }
+    if (!isPositiveOvertime(target.overtime)) {
+      return NextResponse.json(
+        { success: false, message: "This date has no positive overtime" },
+        { status: 400 },
+      );
+    }
+    if (
+      target.status === WORKING_STATUS.IN_PROGRESS ||
+      target.status === WORKING_STATUS.ABSENT ||
+      target.status === WORKING_STATUS.ON_LEAVE
+    ) {
+      return NextResponse.json(
+        { success: false, message: "Overtime request is not allowed for this attendance status" },
+        { status: 400 },
+      );
+    }
+
+    const request = await createOvertimeRequest({
+      employee,
+      date,
+      overtime: target.overtime,
+      comment,
+    });
+    return NextResponse.json({ success: true, request });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to create overtime request";
+    return NextResponse.json({ success: false, message }, { status: 500 });
+  }
+});
+
+export const PATCH = withActiveSession(async (req, user) => {
+  try {
+    if (!canReviewOvertime(user.role)) {
+      return NextResponse.json(
+        { success: false, message: "Not authorized to review overtime requests" },
+        { status: 403 },
+      );
+    }
+
+    const body = await req.json();
+    const id = String(body.id ?? "").trim();
+    const status = String(body.status ?? "").trim();
+    const remarks = String(body.remarks ?? "").trim();
+
+    if (!id) {
+      return NextResponse.json(
+        { success: false, message: "Overtime request id is required" },
+        { status: 400 },
+      );
+    }
+    if (
+      status !== OVERTIME_REQUEST_STATUS.APPROVED &&
+      status !== OVERTIME_REQUEST_STATUS.REJECTED
+    ) {
+      return NextResponse.json(
+        { success: false, message: "Status must be Approved or Rejected" },
+        { status: 400 },
+      );
+    }
+
+    const request = await reviewOvertimeRequest({
+      id,
+      status,
+      remarks,
+      reviewerName: user.name,
+    });
+    return NextResponse.json({ success: true, request });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to review overtime request";
+    return NextResponse.json({ success: false, message }, { status: 500 });
+  }
+});

@@ -8,6 +8,7 @@ import {
   fetchAttendanceHistory,
   fetchAttendancePeriods,
   importAttendanceCsv,
+  submitOvertimeRequest,
   type AttendanceHistoryRow,
   type AttendancePeriod,
 } from "@/lib/attendance/client";
@@ -89,6 +90,7 @@ export default function AttendanceHistoryPage() {
   const [rows, setRows] = useState<AttendanceHistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
+  const [requestingOvertimeId, setRequestingOvertimeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [importMessage, setImportMessage] = useState<string | null>(null);
 
@@ -200,6 +202,22 @@ export default function AttendanceHistoryPage() {
     setMonth(months[0]?.month ?? null);
   }
 
+  async function handleRequestOvertime(row: AttendanceHistoryRow) {
+    const comment = window.prompt("Optional note for approver (press OK to continue):") ?? "";
+    setRequestingOvertimeId(row.id);
+    setError(null);
+    setImportMessage(null);
+    try {
+      await submitOvertimeRequest({ date: row.date, comment });
+      setImportMessage(`Overtime request submitted for ${row.date}.`);
+      await loadHistory();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to submit overtime request");
+    } finally {
+      setRequestingOvertimeId(null);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-6xl">
       <input
@@ -238,6 +256,8 @@ export default function AttendanceHistoryPage() {
           })
         }
         canExport={rows.length > 0}
+        requestingOvertimeId={requestingOvertimeId}
+        onRequestOvertime={(row) => void handleRequestOvertime(row)}
       />
     </div>
   );

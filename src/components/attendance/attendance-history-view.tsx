@@ -55,6 +55,28 @@ function formatOvertimeCell(row: AttendanceHistoryRow) {
   return <span className="font-medium text-emerald-700 dark:text-emerald-400">{value}</span>;
 }
 
+function overtimeApprovalLabel(value?: string): string {
+  if (value === "Pending") return "Requested";
+  if (value === "Accepted") return "Approved";
+  if (value === "Rejected") return "Rejected";
+  return "Not requested";
+}
+
+function overtimeApprovalVariant(value?: string) {
+  if (value === "Accepted") return "success" as const;
+  if (value === "Rejected") return "danger" as const;
+  if (value === "Pending") return "warning" as const;
+  return "default" as const;
+}
+
+function canRequestOvertime(row: AttendanceHistoryRow): boolean {
+  const overtime = (row.overtime ?? "").trim();
+  if (!overtime || overtime === "—" || overtime.startsWith("-")) return false;
+  if (!/\d/.test(overtime)) return false;
+  if (!row.punchOut?.trim()) return false;
+  return (row.overtimeApproval ?? "Not considered") === "Not considered";
+}
+
 function computeSummary(rows: AttendanceHistoryRow[]) {
   let completed = 0;
   let short = 0;
@@ -87,6 +109,8 @@ export function AttendanceHistoryView({
   onImportClick,
   onExport,
   canExport,
+  requestingOvertimeId,
+  onRequestOvertime,
 }: {
   isHr: boolean;
   employees: Employee[];
@@ -105,6 +129,8 @@ export function AttendanceHistoryView({
   onImportClick: () => void;
   onExport: () => void;
   canExport: boolean;
+  requestingOvertimeId?: string | null;
+  onRequestOvertime?: (row: AttendanceHistoryRow) => void;
 }) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
@@ -431,6 +457,16 @@ export function AttendanceHistoryView({
               ),
             },
             {
+              key: "overtimeApproval",
+              header: "OT approval",
+              sortable: true,
+              render: (r) => (
+                <Badge variant={overtimeApprovalVariant(r.overtimeApproval)}>
+                  {overtimeApprovalLabel(r.overtimeApproval)}
+                </Badge>
+              ),
+            },
+            {
               key: "earlyLeaveReason",
               header: "Early leave reason",
               sortable: false,
@@ -454,6 +490,25 @@ export function AttendanceHistoryView({
                   <span className="line-clamp-2 text-sm text-ex-muted" title={r.dailyUpdate}>
                     {r.dailyUpdate}
                   </span>
+                ) : (
+                  <span className="text-ex-muted">—</span>
+                ),
+            },
+            {
+              key: "actions",
+              header: "Actions",
+              sortable: false,
+              sticky: "right",
+              render: (r) =>
+                !isHr && onRequestOvertime && canRequestOvertime(r) ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={requestingOvertimeId === r.id}
+                    onClick={() => onRequestOvertime(r)}
+                  >
+                    {requestingOvertimeId === r.id ? "Requesting..." : "Request OT Approval"}
+                  </Button>
                 ) : (
                   <span className="text-ex-muted">—</span>
                 ),
