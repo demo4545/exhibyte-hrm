@@ -1,10 +1,11 @@
 import { cookies } from "next/headers";
 
-import { ROLES } from "@/app/consts/common";
 import { COOKIE, decodeSession } from "@/lib/session";
-import type { SessionUser, UserRole } from "@/types/auth";
+import type { SessionUser } from "@/types/auth";
 
 import { isSessionUserActive } from "./account-status";
+
+export { canManageEmployees, canViewEmployeeSalary } from "./roles";
 
 /** Decode session cookie without checking account status. */
 export async function getSessionFromCookie(): Promise<SessionUser | null> {
@@ -21,6 +22,3 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   return user;
 }
 
-export function canManageEmployees(role: UserRole): boolean {
-  return role === ROLES.HR_MANAGER || role === ROLES.SUPER_ADMIN;
-}

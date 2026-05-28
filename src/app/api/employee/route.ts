@@ -14,6 +14,7 @@ import {
     createEmployeeFolderStructure,
     uploadEmployeeDocuments,
 } from "@/lib/google/drive";
+import { getOrCreateEmployeeAttendanceSpreadsheet } from "@/lib/google/attendance-sheets";
 import {
     type SortOrder,
     DEFAULT_PAGE_SIZE,
@@ -32,9 +33,10 @@ import {
 import {
     filterEmployeeRowForViewer,
     filterEmployeeSheetForViewer,
+    preserveHrOnlyFieldsOnUpdate,
 } from "@/lib/employee/list-access";
 import { withActiveSession } from "@/lib/auth/api-guard";
-import { canManageEmployees } from "@/lib/auth/server";
+import { canManageEmployees, canViewEmployeeSalary } from "@/lib/auth/server";
 import { prepareEmployeeCredentialsForSave } from "@/lib/auth/credentials-setup";
 import {
     applyPasswordToRowValues,
@@ -223,9 +225,16 @@ export const POST = withActiveSession(async (req) => {
             throw new Error("Failed to create employee documents folder");
         }
 
+        const attendanceSpreadsheetId = await getOrCreateEmployeeAttendanceSpreadsheet(
+            employeeId,
+            employeeName,
+            folders.employeeFolderId,
+        );
+
         let rowValues = mergeRowWithFormFields(headers, values, {
             employeeId,
             documentsFolderId,
+            attendanceSpreadsheetId,
             ...sheetTimestampsForCreate(),
         });
         const prepared = await prepareEmployeeCredentialsForSave(headers, rowValues, {
@@ -322,8 +331,9 @@ export const POST = withActiveSession(async (req) => {
  *   ]
  * }
  */
-export const PUT = withActiveSession(async (req) => {
+export const PUT = withActiveSession(async (req, user) => {
     try {
+        const canViewSalary = canViewEmployeeSalary(user.role);
         const contentType = req.headers.get("content-type") ?? "";
         let range: string | undefined;
         let values: string[][];
@@ -349,6 +359,13 @@ export const PUT = withActiveSession(async (req) => {
                     : "";
 
             let rowValues = payload.values;
+            if (!canViewSalary && existingRow) {
+                rowValues = preserveHrOnlyFieldsOnUpdate(
+                    headers,
+                    rowValues,
+                    existingRow,
+                );
+            }
 
             if (Object.keys(payload.files).length > 0) {
                 if (!documentsFolderId) {
@@ -423,9 +440,17 @@ export const PUT = withActiveSession(async (req) => {
                 const headers = await getSheetHeadersData();
                 const sheetData = await readSheet(EMPLOYEE_SHEET_RANGE);
                 const existingRow = sheetData[sheetRow - 1];
+                let rowValues = values[0] as string[];
+                if (!canViewSalary && existingRow) {
+                    rowValues = preserveHrOnlyFieldsOnUpdate(
+                        headers,
+                        rowValues,
+                        existingRow,
+                    );
+                }
                 const prepared = await prepareEmployeeCredentialsForSave(
                     headers,
-                    values[0] as string[],
+                    rowValues,
                     { isCreate: false, existingRow },
                 );
                 values = [

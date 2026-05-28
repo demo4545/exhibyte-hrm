@@ -16,7 +16,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
-import { filterNav, type NavItem } from "@/lib/rbac";
+import {
+  filterNav,
+  isNavChildActive,
+  isNavGroupActive,
+  type NavItem,
+} from "@/lib/rbac";
 import { useAuth } from "@/contexts/auth-provider";
 
 const iconMap = {
@@ -53,9 +58,7 @@ function NavGroup({
 }) {
   const [open, setOpen] = useState(true);
   const Icon = iconMap[item.icon as keyof typeof iconMap] ?? LayoutDashboard;
-  const active =
-    pathname === item.href ||
-    (item.children?.some((c) => pathname.startsWith(c.href)) ?? false);
+  const active = isNavGroupActive(pathname, item);
 
   if (!item.children?.length) {
     return (
@@ -96,7 +99,7 @@ function NavGroup({
       {open ? (
         <div className="ml-4 flex flex-col gap-0.5 border-l border-ex-border pl-3">
           {item.children.map((child) => {
-            const childActive = pathname === child.href || pathname.startsWith(`${child.href}/`);
+            const childActive = isNavChildActive(pathname, child.href, item.href);
             return (
               <Link
                 key={child.href}

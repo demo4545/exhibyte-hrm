@@ -17,6 +17,72 @@ export type NavItem = {
   children?: NavChild[];
 };
 
+/** Section index links (e.g. /employee) must not match deeper sibling routes (e.g. /employee/punch). */
+export function isNavLinkActive(
+  pathname: string,
+  href: string,
+  options?: { exactOnly?: boolean },
+): boolean {
+  if (pathname === href) return true;
+  if (options?.exactOnly) return false;
+  return pathname.startsWith(`${href}/`);
+}
+
+/** Any route under the Employee module (directory, profile by row, edit, new, etc.). */
+export function isEmployeeSectionPath(pathname: string): boolean {
+  return pathname === "/employee" || pathname.startsWith("/employee/");
+}
+
+/**
+ * Employee directory routes: list, add, and per-employee pages (`/employee/6/profile`).
+ * Excludes static module pages that have their own nav item (punch, attendance, …).
+ */
+export function isEmployeeDirectoryPath(pathname: string): boolean {
+  if (pathname === "/employee") return true;
+  if (!pathname.startsWith("/employee/")) return false;
+
+  const firstSegment = pathname.slice("/employee/".length).split("/")[0] ?? "";
+  if (firstSegment === "new") return true;
+  if (/^\d+$/.test(firstSegment)) return true;
+
+  return false;
+}
+
+/** Resolve sidebar active state for a nav child link. */
+export function isNavChildActive(
+  pathname: string,
+  childHref: string,
+  parentHref: string,
+): boolean {
+  if (parentHref === "/employee") {
+    if (childHref === "/employee") {
+      return isEmployeeDirectoryPath(pathname);
+    }
+    if (childHref === "/employee/profile") {
+      return pathname === "/employee/profile";
+    }
+  }
+
+  return isNavLinkActive(pathname, childHref, {
+    exactOnly: childHref === parentHref,
+  });
+}
+
+/** Resolve sidebar active state for a top-level nav group. */
+export function isNavGroupActive(pathname: string, item: NavItem): boolean {
+  if (item.href === "/employee") {
+    return isEmployeeSectionPath(pathname);
+  }
+
+  if (pathname === item.href) return true;
+
+  return (
+    item.children?.some((child) =>
+      isNavChildActive(pathname, child.href, item.href),
+    ) ?? false
+  );
+}
+
 export const navStructure: NavItem[] = [
   {
     label: "Overview",
@@ -41,13 +107,13 @@ export const navStructure: NavItem[] = [
         href: "/employee/profile",
         roles: [SUPER_ADMIN, HR_MANAGER, EMPLOYEE],
       },
-      { label: "Punch in / out", href: "/employee/punch", roles: [], },
+      { label: "Punch in / out", href: "/employee/punch", roles: [SUPER_ADMIN, HR_MANAGER, EMPLOYEE], },
       { label: "Daily tasks", href: "/employee/tasks", roles: [], },
       { label: "Overtime & approvals", href: "/employee/overtime", roles: [], },
       { label: "Salary slips", href: "/employee/salary-slips", roles: [], },
       { label: "Complaints", href: "/employee/complaints", roles: [], },
       { label: "Reports & charts", href: "/employee/reports", roles: [], },
-      { label: "Monthly attendance", href: "/employee/attendance", roles: [], },
+      { label: "Attendance history", href: "/employee/attendance", roles: [SUPER_ADMIN, HR_MANAGER, EMPLOYEE], },
       { label: "Leave & festivals", href: "/employee/leave-festival", roles: [], },
       { label: "Leave privacy", href: "/employee/privacy", roles: [], },
     ],
@@ -124,10 +190,12 @@ export function canAccessPath(role: UserRole, pathname: string): boolean {
     if (!item.roles.includes(role)) continue;
 
     if (item.children?.length) {
-      for (const child of item.children) {
+      const children = [...item.children].sort((a, b) => b.href.length - a.href.length);
+      for (const child of children) {
         if (
-          pathname === child.href ||
-          pathname.startsWith(`${child.href}/`)
+          isNavLinkActive(pathname, child.href, {
+            exactOnly: child.href === item.href,
+          })
         ) {
           return child.roles.includes(role);
         }

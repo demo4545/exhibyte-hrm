@@ -156,6 +156,16 @@ async function getOrCreateEmployeesRootFolder(): Promise<string> {
     return getOrCreateFolder(EMPLOYEES_ROOT_FOLDER_NAME, HRM_FOLDER_ID);
 }
 
+export async function getParentFolderId(folderId: string): Promise<string | null> {
+    const drive = await getDrive();
+    const response = await drive.files.get({
+        fileId: folderId,
+        fields: "parents",
+        supportsAllDrives: true,
+    });
+    return response.data.parents?.[0] ?? null;
+}
+
 export const createEmployeeFolderStructure = async (
     employeeId: string,
     employeeName: string,
@@ -173,5 +183,5 @@ export const createEmployeeFolderStructure = async (
         employeeFolderId,
     );
 
-    return { documentsFolderId };
+    return { employeeFolderId, documentsFolderId };
 };

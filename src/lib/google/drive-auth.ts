@@ -4,9 +4,14 @@ import path from "node:path";
 import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 
-import { getServiceAccountDriveAuth, isDriveImpersonationEnabled } from "./auth";
+import {
+    getServiceAccountDriveAuth,
+    isDriveImpersonationEnabled,
+    SPREADSHEETS_SCOPE,
+} from "./auth";
 
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
+const DRIVE_AND_SHEETS_SCOPES = [DRIVE_SCOPE, SPREADSHEETS_SCOPE];
 const TOKEN_DIR = path.join(process.cwd(), ".data");
 const TOKEN_FILE = path.join(TOKEN_DIR, "google-drive-oauth.json");
 
@@ -45,7 +50,7 @@ export function getDriveOAuthConsentUrl(): string | null {
     return client.generateAuthUrl({
         access_type: "offline",
         prompt: "consent",
-        scope: [DRIVE_SCOPE],
+        scope: DRIVE_AND_SHEETS_SCOPES,
     });
 }
 
@@ -126,6 +131,19 @@ export async function getDrive() {
     return google.drive({ version: "v3", auth });
 }
 
+/**
+ * Same credentials as Drive (OAuth user or service account) so attendance
+ * spreadsheets created in Shared Drive / My Drive remain accessible.
+ */
+export async function getSheetsAuth() {
+    return getDriveAuth();
+}
+
+export async function getSheetsClient() {
+    const auth = await getSheetsAuth();
+    return google.sheets({ version: "v4", auth });
+}
+
 export function formatDriveError(error: unknown): Error {
     const message =
         error instanceof Error
@@ -137,6 +155,14 @@ export function formatDriveError(error: unknown): Error {
             "Service accounts cannot upload to personal My Drive. " +
                 "Connect your Gmail at Integrations → Google Drive, " +
                 "or move the HRM folder to a Workspace Shared Drive.",
+        );
+    }
+
+    if (/permission|forbidden|403/i.test(message)) {
+        return new Error(
+            "Google permission denied. Open Integrations → Google Drive, disconnect, " +
+                "then connect again (Drive + Sheets access). Ensure the HRM folder is shared " +
+                "with the connected account.",
         );
     }
 

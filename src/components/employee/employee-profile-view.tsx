@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { normalizeDateValue } from "@/components/ui/date-input";
 import { ProfileAccountSettings } from "@/components/employee/profile-account-settings";
 import { useAuth } from "@/contexts/auth-provider";
+import { canViewEmployeeSalary } from "@/lib/auth/roles";
 import {
   getDocumentDisplayName,
   getDocumentHref,
@@ -116,6 +117,7 @@ export function EmployeeProfileView({
   const [hasPassword, setHasPassword] = useState(initialHasPassword);
   const showDocuments =
     user?.role === ROLES.HR_MANAGER || user?.role === ROLES.SUPER_ADMIN;
+  const showSalary = user ? canViewEmployeeSalary(user.role) : false;
   const isInactive = !isEmployeeStatusActive(form.status);
 
   useEffect(() => {
@@ -206,6 +208,13 @@ export function EmployeeProfileView({
               label="Experience (years)"
               value={form.experience || "—"}
             />
+
+            {showSalary ? (
+              <ReadOnlyField
+                label="Salary (monthly)"
+                value={form.salary?.trim() ? form.salary : "—"}
+              />
+            ) : null}
 
             <ReadOnlyField label="PAN" value={maskPan(form.panNumber)} />
             <ReadOnlyField label="Aadhaar" value={maskAadhar(form.aadharNumber)} />

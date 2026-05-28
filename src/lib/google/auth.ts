@@ -10,7 +10,8 @@ const GOOGLE_DRIVE_IMPERSONATE_USER =
     process.env.GOOGLE_DRIVE_IMPERSONATE_USER?.trim();
 
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
-const SCOPES = [DRIVE_SCOPE, "https://www.googleapis.com/auth/spreadsheets"];
+export const SPREADSHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+const SCOPES = [DRIVE_SCOPE, SPREADSHEETS_SCOPE];
 
 if (!GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY) {
     throw new Error("Missing Google service account environment variables");
@@ -30,7 +31,7 @@ export function getServiceAccountDriveAuth() {
         return new google.auth.JWT({
             email: GOOGLE_CLIENT_EMAIL,
             key: GOOGLE_PRIVATE_KEY,
-            scopes: [DRIVE_SCOPE],
+            scopes: SCOPES,
             subject: GOOGLE_DRIVE_IMPERSONATE_USER,
         });
     }

@@ -9,6 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { AttendanceWidget } from "@/components/attendance/attendance-widget";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -65,6 +66,7 @@ export default function DashboardPage() {
       </section>
 
       <section className="grid gap-4 lg:grid-cols-3">
+        <AttendanceWidget />
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Onboarding vs attrition</CardTitle>

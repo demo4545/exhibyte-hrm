@@ -20,6 +20,8 @@ import {
   type EmployeeFormState,
 } from "@/lib/employee";
 import { POSITIONS, ROLES } from "@/app/consts/common";
+import { useAuth } from "@/contexts/auth-provider";
+import { canViewEmployeeSalary } from "@/lib/auth/roles";
 import {
   ALL_TECH_SKILLS,
   joinSkillsValue,
@@ -60,6 +62,8 @@ export type EmployeeFormProps = {
 
 export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
   const router = useRouter();
+  const { user } = useAuth();
+  const canViewSalary = user ? canViewEmployeeSalary(user.role) : false;
   const isEdit = mode === "edit";
 
   const [form, setForm] = useState<EmployeeFormState>(initialEmployeeForm);
@@ -559,6 +563,25 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
                     />
                   </FormField>
                 </div>
+
+                {canViewSalary ? (
+                  <div className="space-y-2 sm:col-span-2">
+                    <FormField label="Salary (monthly)" id="salary">
+                      <Input
+                        id="salary"
+                        type="text"
+                        inputMode="decimal"
+                        value={form.salary}
+                        onChange={update("salary")}
+                        placeholder="e.g. 50000 or 5,00,000"
+                        autoComplete="off"
+                      />
+                      <p className="text-xs text-ex-muted">
+                        Visible only to HR and super admin — stored in the employee sheet.
+                      </p>
+                    </FormField>
+                  </div>
+                ) : null}
 
                 <FormField label="Tech skills" id="skills" className="sm:col-span-2">
                   <MultiSelect

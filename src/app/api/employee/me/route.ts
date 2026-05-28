@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { withActiveSession } from "@/lib/auth/api-guard";
 import { resolveEmployeeRecordForSession } from "@/lib/auth/employee-record";
 import { redactPasswordFromRow } from "@/lib/auth/row-credentials";
+import { canViewEmployeeSalary } from "@/lib/auth/server";
+import { redactHrOnlyFieldsFromRow } from "@/lib/employee/list-access";
 import { sheetRowToForm } from "@/lib/employee";
 
 export const GET = withActiveSession(async (_request, user) => {
@@ -16,14 +18,19 @@ export const GET = withActiveSession(async (_request, user) => {
     }
 
     const { headers, row, sheetRow } = record;
-    const form = sheetRowToForm(headers, row);
+    const canViewSalary = canViewEmployeeSalary(user.role);
+    let safeRow = redactPasswordFromRow(headers, row);
+    if (!canViewSalary) {
+      safeRow = redactHrOnlyFieldsFromRow(headers, safeRow);
+    }
+    const form = sheetRowToForm(headers, safeRow);
     const hasPassword = Boolean(form.password.trim());
 
     return NextResponse.json({
       success: true,
       sheetRow,
       headers,
-      row: redactPasswordFromRow(headers, row),
+      row: safeRow,
       username: form.username.trim(),
       hasPassword,
     });
