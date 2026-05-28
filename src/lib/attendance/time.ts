@@ -419,9 +419,7 @@ export function workingStatusFromHours(
   if (workingMs < requiredMs) return WORKING_STATUS.SHORT;
   if (workingMs > requiredMs) {
     const overtimeMs = computeOvertimeMs(workingMs, requiredMs);
-    return overtimeMs >= OVERTIME_REVIEW_THRESHOLD_MS
-      ? WORKING_STATUS.PENDING_REVIEW
-      : WORKING_STATUS.COMPLETED;
+    return overtimeMs >= OVERTIME_REVIEW_THRESHOLD_MS ? WORKING_STATUS.OVERTIME : WORKING_STATUS.COMPLETED;
   }
   return WORKING_STATUS.COMPLETED;
 }

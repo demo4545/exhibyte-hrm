@@ -109,7 +109,7 @@ export const navStructure: NavItem[] = [
       },
       { label: "Punch in / out", href: "/employee/punch", roles: [SUPER_ADMIN, HR_MANAGER, EMPLOYEE], },
       { label: "Overtime & approvals", href: "/employee/overtime", roles: [SUPER_ADMIN, HR_MANAGER], },
-      { label: "Salary slips", href: "/employee/salary-slips", roles: [], },
+      { label: "Salary slips", href: "/employee/salary-slips", roles: [SUPER_ADMIN, HR_MANAGER, EMPLOYEE], },
       { label: "Complaints", href: "/employee/complaints", roles: [], },
       { label: "Attendance history", href: "/employee/attendance", roles: [SUPER_ADMIN, HR_MANAGER, EMPLOYEE], },
       { label: "Leave & festivals", href: "/employee/leave-festival", roles: [], },

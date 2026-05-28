@@ -297,11 +297,35 @@ function applyAttendanceMetrics(rowValues: string[], baseDate: Date): void {
   if (punchOut) {
     rowValues[ATTENDANCE_COL.workingHours] = metrics.workingHours;
     rowValues[ATTENDANCE_COL.overtime] = metrics.overtime;
-    rowValues[ATTENDANCE_COL.status] = metrics.status;
+    rowValues[ATTENDANCE_COL.status] = resolveAttendanceStatus(
+      metrics.status,
+      rowValues[ATTENDANCE_COL.isOvertimeApproved] ?? OVERTIME_APPROVAL.NOT_CONSIDERED,
+      metrics.overtime,
+    );
   } else {
     rowValues[ATTENDANCE_COL.overtime] = "—";
     rowValues[ATTENDANCE_COL.status] = WORKING_STATUS.IN_PROGRESS;
   }
+}
+
+function resolveAttendanceStatus(
+  baseStatus: string,
+  overtimeApproval: string,
+  overtimeValue: string,
+): string {
+  const approval = overtimeApproval.trim();
+  const overtime = overtimeValue.trim();
+  const hasPositiveOvertime =
+    overtime.length > 0 && overtime !== "—" && !overtime.startsWith("-") && /\d/.test(overtime);
+
+  if (!hasPositiveOvertime) {
+    return baseStatus;
+  }
+
+  if (approval === OVERTIME_APPROVAL.PENDING) return WORKING_STATUS.OVERTIME_REQUESTED;
+  if (approval === OVERTIME_APPROVAL.ACCEPTED) return WORKING_STATUS.OVERTIME_APPROVED;
+  if (approval === OVERTIME_APPROVAL.REJECTED) return WORKING_STATUS.OVERTIME_REJECTED;
+  return baseStatus;
 }
 
 function rowFromValues(values: string[], sheetRow: number): AttendanceRow {
@@ -329,7 +353,13 @@ function rowFromValues(values: string[], sheetRow: number): AttendanceRow {
     breakEnd: values[ATTENDANCE_COL.breakEnd] ?? "",
     totalBreakTime: values[ATTENDANCE_COL.totalBreakTime] ?? "",
     workingHours: punchedOut ? metrics.workingHours : "",
-    status: punchedOut ? metrics.status : (values[ATTENDANCE_COL.status] ?? WORKING_STATUS.IN_PROGRESS),
+    status: punchedOut
+      ? resolveAttendanceStatus(
+          metrics.status,
+          values[ATTENDANCE_COL.isOvertimeApproved] ?? OVERTIME_APPROVAL.NOT_CONSIDERED,
+          metrics.overtime,
+        )
+      : (values[ATTENDANCE_COL.status] ?? WORKING_STATUS.IN_PROGRESS),
     overtime: punchedOut ? metrics.overtime : "—",
     earlyLeaveReason: values[ATTENDANCE_COL.earlyLeaveReason] ?? "",
     dailyUpdate: values[ATTENDANCE_COL.dailyUpdate] ?? "",

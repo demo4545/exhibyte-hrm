@@ -18,17 +18,31 @@ import { Select } from "@/components/ui/select";
 import { StatCard } from "@/components/ui/stat-card";
 import { IDEAL_WORKING_HOURS } from "@/lib/attendance/constants";
 import type { AttendanceHistoryRow, AttendancePeriod } from "@/lib/attendance/client";
+import { formatDuration, parseDurationToMs } from "@/lib/attendance/time";
 import type { Employee } from "@/types/employee";
 import type { SortOrder } from "@/types/table";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 15;
 
-type StatusFilter = "all" | "Completed" | "Short Hours" | "Overtime";
+type StatusFilter = "all" | string;
 
 function statusBadgeVariant(status: string) {
-  if (status === "Completed" || status === "Overtime") return "success" as const;
-  if (status === "Short Hours") return "warning" as const;
+  if (status === "Completed" || status === "Overtime Approved") {
+    return "success" as const;
+  }
+  if (
+    status === "Short Hours" ||
+    status === "OT Approval Requested" ||
+    status === "OT Approval Pending" ||
+    status === "In Progress" ||
+    status === "Overtime Requested"
+  ) {
+    return "warning" as const;
+  }
+  if (status === "Overtime Rejected" || status === "Absent") return "danger" as const;
+  if (status === "On Leave") return "accent" as const;
+  if (status === "Overtime") return "accent" as const;
   return "default" as const;
 }
 
@@ -74,21 +88,55 @@ function canRequestOvertime(row: AttendanceHistoryRow): boolean {
   if (!overtime || overtime === "—" || overtime.startsWith("-")) return false;
   if (!/\d/.test(overtime)) return false;
   if (!row.punchOut?.trim()) return false;
-  return (row.overtimeApproval ?? "Not considered") === "Not considered";
+  const status = (row.status ?? "").trim();
+  return ![
+    "OT Approval Requested",
+    "OT Approval Pending",
+    "Overtime Requested",
+    "Overtime Approved",
+    "Overtime Rejected",
+  ].includes(status);
 }
 
 function computeSummary(rows: AttendanceHistoryRow[]) {
   let completed = 0;
   let short = 0;
   let overtime = 0;
+  let overtimeApproved = 0;
+  let overtimePending = 0;
+  let overtimeRejected = 0;
+  let overtimeNotRequested = 0;
+  let approvedOvertimeMs = 0;
 
   for (const row of rows) {
     if (row.status === "Completed") completed++;
     else if (row.status === "Short Hours") short++;
     else if (row.status === "Overtime") overtime++;
+
+    const overtimeApproval = (row.overtimeApproval ?? "Not considered").trim();
+    if (overtimeApproval === "Accepted") {
+      overtimeApproved++;
+      approvedOvertimeMs += parseDurationToMs((row.overtime ?? "").replace(/^-/, ""));
+    } else if (overtimeApproval === "Pending") {
+      overtimePending++;
+    } else if (overtimeApproval === "Rejected") {
+      overtimeRejected++;
+    } else {
+      overtimeNotRequested++;
+    }
   }
 
-  return { total: rows.length, completed, short, overtime };
+  return {
+    total: rows.length,
+    completed,
+    short,
+    overtime,
+    overtimeApproved,
+    overtimePending,
+    overtimeRejected,
+    overtimeNotRequested,
+    approvedOvertime: formatDuration(approvedOvertimeMs),
+  };
 }
 
 export function AttendanceHistoryView({
@@ -146,9 +194,7 @@ export function AttendanceHistoryView({
 
   const filteredRows = useMemo(() => {
     let list = [...rows];
-    if (statusFilter !== "all") {
-      list = list.filter((r) => r.status === statusFilter);
-    }
+    if (statusFilter !== "all") list = list.filter((r) => r.status === statusFilter);
     list.sort((a, b) => {
       const av = String((a as Record<string, string>)[sortBy] ?? "");
       const bv = String((b as Record<string, string>)[sortBy] ?? "");
@@ -165,12 +211,44 @@ export function AttendanceHistoryView({
 
   const selectedEmployee = employees.find((e) => Number(e.sheetRow) === selectedSheetRow);
 
-  const statusFilters: { id: StatusFilter; label: string; count: number }[] = [
-    { id: "all", label: "All", count: rows.length },
-    { id: "Completed", label: "Completed", count: summary.completed },
-    { id: "Short Hours", label: "Short", count: summary.short },
-    { id: "Overtime", label: "Overtime", count: summary.overtime },
-  ];
+  const statusFilters = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      const key = row.status?.trim() || "Unknown";
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+
+    const preferredOrder = [
+      "Completed",
+      "Short Hours",
+      "Overtime",
+      "OT Approval Requested",
+      "Overtime Approved",
+      "Overtime Rejected",
+      "Overtime Requested",
+      "OT Approval Pending",
+      "In Progress",
+      "On Leave",
+      "Absent",
+      "Unknown",
+    ];
+
+    const ordered = [...counts.entries()].sort((a, b) => {
+      const ai = preferredOrder.indexOf(a[0]);
+      const bi = preferredOrder.indexOf(b[0]);
+      if (ai !== -1 || bi !== -1) {
+        if (ai === -1) return 1;
+        if (bi === -1) return -1;
+        return ai - bi;
+      }
+      return a[0].localeCompare(b[0]);
+    });
+
+    return [
+      { id: "all" as StatusFilter, label: "All", count: rows.length },
+      ...ordered.map(([id, count]) => ({ id, label: id, count })),
+    ];
+  }, [rows]);
 
   function handleSort(key: string) {
     if (sortBy === key) {
@@ -339,8 +417,12 @@ export function AttendanceHistoryView({
             value={String(summary.completed)}
             hint={`${IDEAL_WORKING_HOURS}h target met`}
           />
-          <StatCard label="Short hours" value={String(summary.short)} hint="Left early" />
-          <StatCard label="Overtime days" value={String(summary.overtime)} hint="Above target" />
+          <StatCard
+            label="Approved overtime"
+            value={summary.approvedOvertime}
+            hint="Accepted this month"
+          />
+          <StatCard label="OT approved days" value={String(summary.overtimeApproved)} hint="Rows approved" />
         </div>
       ) : null}
 
@@ -360,10 +442,10 @@ export function AttendanceHistoryView({
                 : "border-ex-border bg-ex-elevated text-ex-muted hover:border-ex-secondary/30 hover:text-ex-primary",
             )}
           >
-            {f.id === "Short Hours" ? (
-              <TrendingDown className="size-3.5" aria-hidden />
-            ) : f.id === "Overtime" ? (
+            {f.id === "Overtime" || f.id === "Overtime Approved" ? (
               <TrendingUp className="size-3.5" aria-hidden />
+            ) : f.id === "Short Hours" || f.id === "Overtime Rejected" ? (
+              <TrendingDown className="size-3.5" aria-hidden />
             ) : null}
             {f.label}
             <span
@@ -454,16 +536,6 @@ export function AttendanceHistoryView({
               sortable: true,
               render: (r) => (
                 <Badge variant={statusBadgeVariant(r.status)}>{r.status || "—"}</Badge>
-              ),
-            },
-            {
-              key: "overtimeApproval",
-              header: "OT approval",
-              sortable: true,
-              render: (r) => (
-                <Badge variant={overtimeApprovalVariant(r.overtimeApproval)}>
-                  {overtimeApprovalLabel(r.overtimeApproval)}
-                </Badge>
               ),
             },
             {
