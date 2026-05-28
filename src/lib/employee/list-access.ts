@@ -48,6 +48,7 @@ export function filterEmployeeRowForViewer(
 }
 
 const HR_ONLY_FIELD_SET = new Set<string>(EMPLOYEE_HR_ONLY_FIELDS);
+const LOCKED_FOR_NON_MANAGERS_SET = new Set<string>(["role"]);
 
 /** Clear HR-only cells in a row (e.g. own-profile API for employees). */
 export function redactHrOnlyFieldsFromRow(headers: string[], row: string[]): string[] {
@@ -70,7 +71,10 @@ export function preserveHrOnlyFieldsOnUpdate(
 
   return incomingRow.map((cell, index) => {
     const key = formKeyByIndex[index];
-    if (key != null && HR_ONLY_FIELD_SET.has(key)) {
+    if (
+      key != null &&
+      (HR_ONLY_FIELD_SET.has(key) || LOCKED_FOR_NON_MANAGERS_SET.has(key))
+    ) {
       return existingRow[index] ?? "";
     }
     return cell;

@@ -1,12 +1,12 @@
 "use client";
 
 import { Loader2, LogOut } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { EARLY_LEAVE_REASON_MIN_LENGTH, IDEAL_WORKING_HOURS } from "@/lib/attendance/constants";
+import { EARLY_LEAVE_REASON_MIN_LENGTH } from "@/lib/attendance/constants";
 import { formatDuration } from "@/lib/attendance/time";
 
 const QUICK_REASONS = [
@@ -19,6 +19,8 @@ const QUICK_REASONS = [
 export function EarlyLeaveDialog({
   open,
   shortfallMs,
+  requireEarlyLeaveReason,
+  initialDailyUpdate,
   submitting,
   error,
   onConfirm,
@@ -26,28 +28,35 @@ export function EarlyLeaveDialog({
 }: {
   open: boolean;
   shortfallMs: number;
+  requireEarlyLeaveReason: boolean;
+  initialDailyUpdate?: string;
   submitting?: boolean;
   error?: string | null;
-  onConfirm: (reason: string) => void;
+  onConfirm: (payload: { earlyLeaveReason?: string; dailyUpdate: string }) => void;
   onCancel: () => void;
 }) {
   const [reason, setReason] = useState("");
-
-  useEffect(() => {
-    if (!open) setReason("");
-  }, [open]);
+  const [dailyUpdate, setDailyUpdate] = useState(initialDailyUpdate ?? "");
 
   if (!open) return null;
 
   const trimmed = reason.trim();
+  const trimmedDailyUpdate = dailyUpdate.trim();
   const tooShort =
-    trimmed.length > 0 && trimmed.length < EARLY_LEAVE_REASON_MIN_LENGTH;
-  const canSubmit = trimmed.length >= EARLY_LEAVE_REASON_MIN_LENGTH && !submitting;
+    requireEarlyLeaveReason &&
+    trimmed.length > 0 &&
+    trimmed.length < EARLY_LEAVE_REASON_MIN_LENGTH;
+  const hasValidReason =
+    !requireEarlyLeaveReason || trimmed.length >= EARLY_LEAVE_REASON_MIN_LENGTH;
+  const canSubmit = hasValidReason && trimmedDailyUpdate.length > 0 && !submitting;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
-    onConfirm(trimmed);
+    onConfirm({
+      earlyLeaveReason: requireEarlyLeaveReason ? trimmed : undefined,
+      dailyUpdate: trimmedDailyUpdate,
+    });
   }
 
   return (
@@ -73,53 +82,76 @@ export function EarlyLeaveDialog({
           </div>
           <div className="min-w-0">
             <h2 id="early-leave-title" className="text-lg font-semibold text-ex-primary">
-              Leaving before {IDEAL_WORKING_HOURS}h?
+              Punch out for today?
             </h2>
             <p className="mt-1 text-sm text-ex-muted">
-              You&apos;re about{" "}
-              <span className="font-semibold text-amber-700 dark:text-amber-400">
-                {formatDuration(shortfallMs)}
-              </span>{" "}
-              short of your daily work target. Please share why you&apos;re punching out early.
+              {requireEarlyLeaveReason ? (
+                <>
+                  You&apos;re about{" "}
+                  <span className="font-semibold text-amber-700 dark:text-amber-400">
+                    {formatDuration(shortfallMs)}
+                  </span>{" "}
+                  short of your daily work target. Please share why you&apos;re punching out early.
+                </>
+              ) : (
+                "Before punch out, quickly note what tasks you completed today."
+              )}
             </p>
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          {QUICK_REASONS.map((preset) => (
-            <button
-              key={preset}
-              type="button"
+        {requireEarlyLeaveReason ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {QUICK_REASONS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                disabled={submitting}
+                className="rounded-full border border-amber-200/90 bg-amber-50/80 px-3 py-1 text-xs font-medium text-amber-900 transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800/60 dark:bg-amber-950/50 dark:text-amber-100 dark:hover:bg-amber-900/60"
+                onClick={() => setReason(preset)}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {requireEarlyLeaveReason ? (
+          <div className="mt-4 space-y-2">
+            <Label htmlFor="early-leave-reason">Reason for early punch-out</Label>
+            <Textarea
+              id="early-leave-reason"
+              rows={3}
+              required
               disabled={submitting}
-              className="rounded-full border border-amber-200/90 bg-amber-50/80 px-3 py-1 text-xs font-medium text-amber-900 transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800/60 dark:bg-amber-950/50 dark:text-amber-100 dark:hover:bg-amber-900/60"
-              onClick={() => setReason(preset)}
-            >
-              {preset}
-            </button>
-          ))}
-        </div>
+              placeholder="e.g. doctor appointment, approved half-day..."
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              className="resize-none"
+            />
+            <p className="text-xs text-ex-muted">
+              At least {EARLY_LEAVE_REASON_MIN_LENGTH} characters
+              {tooShort ? (
+                <span className="text-amber-700 dark:text-amber-400">
+                  {" "}
+                  ({EARLY_LEAVE_REASON_MIN_LENGTH - trimmed.length} more needed)
+                </span>
+              ) : null}
+            </p>
+          </div>
+        ) : null}
 
         <div className="mt-4 space-y-2">
-          <Label htmlFor="early-leave-reason">Reason for early punch-out</Label>
+          <Label htmlFor="daily-update">What tasks did you complete today?</Label>
           <Textarea
-            id="early-leave-reason"
-            rows={3}
+            id="daily-update"
+            rows={4}
             required
             disabled={submitting}
-            placeholder="e.g. doctor appointment, approved half-day…"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            className="resize-none"
+            placeholder="Summarize your completed work for today"
+            value={dailyUpdate}
+            onChange={(e) => setDailyUpdate(e.target.value)}
           />
-          <p className="text-xs text-ex-muted">
-            At least {EARLY_LEAVE_REASON_MIN_LENGTH} characters
-            {tooShort ? (
-              <span className="text-amber-700 dark:text-amber-400">
-                {" "}
-                ({EARLY_LEAVE_REASON_MIN_LENGTH - trimmed.length} more needed)
-              </span>
-            ) : null}
-          </p>
         </div>
 
         {error ? (

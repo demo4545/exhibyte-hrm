@@ -1,5 +1,6 @@
 export type TodayAttendance = {
   date: string;
+  workMode?: string;
   punchIn: string;
   punchOut: string;
   breakStart: string;
@@ -21,11 +22,13 @@ export type TodayAttendance = {
   remainingFormatted: string;
   breakAllowanceFormatted: string;
   earlyLeaveReason?: string;
+  dailyUpdate?: string;
 };
 
 export type AttendanceHistoryRow = {
   id: string;
   date: string;
+  workMode?: string;
   punchIn: string;
   punchOut: string;
   breakTime: string;
@@ -33,6 +36,7 @@ export type AttendanceHistoryRow = {
   overtime: string;
   status: string;
   earlyLeaveReason?: string;
+  dailyUpdate?: string;
 };
 
 export type AttendancePeriod = {
@@ -65,6 +69,8 @@ export async function fetchTodayAttendance(): Promise<TodayAttendance | null> {
 
 export type AttendanceActionPayload = {
   earlyLeaveReason?: string;
+  dailyUpdate?: string;
+  workMode?: string;
 };
 
 export async function postAttendanceAction(
@@ -83,6 +89,7 @@ export async function postAttendanceAction(
   const record = data.record;
   return {
     date: record.date || new Date().toISOString().slice(0, 10),
+    workMode: record.workMode ?? "",
     punchIn: record.punchIn,
     punchOut: record.punchOut,
     breakStart: record.breakStart,
@@ -100,10 +107,53 @@ export async function postAttendanceAction(
     idealHours: record.idealHours ?? 8,
     idealBreakHours: record.idealBreakHours ?? 1,
     idealShiftHours: record.idealShiftHours ?? 9,
-    remainingMs: Math.max(0, 8 * 60 * 60 * 1000 - record.workedMs),
+    remainingMs: Math.max(0, (record.idealHours ?? 8) * 60 * 60 * 1000 - record.workedMs),
     remainingFormatted: "",
     breakAllowanceFormatted: record.breakAllowanceFormatted ?? "0h / 1h",
     earlyLeaveReason: record.earlyLeaveReason ?? "",
+    dailyUpdate: record.dailyUpdate ?? "",
+  };
+}
+
+export async function updateDailyUpdate(
+  date: string,
+  dailyUpdate: string,
+): Promise<TodayAttendance> {
+  const res = await fetch("/api/attendance", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ date, dailyUpdate }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.message ?? "Failed to update daily update");
+
+  const record = data.record;
+  return {
+    date: record.date || date,
+    workMode: record.workMode ?? "",
+    punchIn: record.punchIn,
+    punchOut: record.punchOut,
+    breakStart: record.breakStart,
+    breakEnd: record.breakEnd,
+    totalBreakTime: record.totalBreakTime,
+    workingHours: record.workingHours,
+    overtime: record.overtime ?? "—",
+    status: record.status,
+    onBreak: record.onBreak,
+    hasPunchedIn: record.hasPunchedIn,
+    hasPunchedOut: record.hasPunchedOut,
+    workedMs: record.workedMs,
+    workedFormatted: record.workedFormatted,
+    workedShort: record.workedFormatted,
+    idealHours: record.idealHours ?? 8,
+    idealBreakHours: record.idealBreakHours ?? 1,
+    idealShiftHours: record.idealShiftHours ?? 9,
+    remainingMs: Math.max(0, (record.idealHours ?? 8) * 60 * 60 * 1000 - record.workedMs),
+    remainingFormatted: "",
+    breakAllowanceFormatted: record.breakAllowanceFormatted ?? "0h / 1h",
+    earlyLeaveReason: record.earlyLeaveReason ?? "",
+    dailyUpdate: record.dailyUpdate ?? "",
   };
 }
 
@@ -173,6 +223,10 @@ export type ImportAttendanceResult = {
   updated: number;
   holidaysSkipped: number;
   errors: string[];
+  employee?: {
+    employeeId: string;
+    employeeName: string;
+  };
 };
 
 export async function importAttendanceCsv(
@@ -202,6 +256,7 @@ export async function importAttendanceCsv(
     updated: data.updated,
     holidaysSkipped: data.holidaysSkipped ?? 0,
     errors: data.errors ?? [],
+    employee: data.employee,
   };
 }
 

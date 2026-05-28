@@ -4,6 +4,8 @@ import {
   ATTENDANCE_LAST_COLUMN,
   EARLY_LEAVE_REASON_MIN_LENGTH,
   IMPORT_DEFAULT_BREAK,
+  WORK_MODE,
+  WORK_MODE_OPTIONS,
   WORKING_STATUS,
 } from "@/lib/attendance/constants";
 import {
@@ -15,6 +17,7 @@ import {
   monthlySheetTitle,
   normalizeSheetDate,
   parseDurationToMs,
+  resolveAttendanceBreakMs,
   parseSheetClockTime,
   parseTimeOnDate,
 } from "@/lib/attendance/time";
@@ -27,10 +30,244 @@ import {
 } from "./sheet-format";
 
 const attendanceSpreadsheetLocks = new Map<string, Promise<string>>();
+const yearSpreadsheetIdCache = new Map<string, string>();
+const attendanceSpreadsheetMetaCache = new Map<
+  string,
+  {
+    name: string;
+    parentFolderId: string | null;
+    employeeSlug: string;
+    legacyRootName: string;
+    sourceYear: number | null;
+  }
+>();
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isQuotaError = (error: unknown): boolean => {
+  const text = String(
+    (error as { message?: string })?.message ??
+    (error as { errors?: Array<{ message?: string }> })?.errors?.[0]?.message ??
+    "",
+  ).toLowerCase();
+  return text.includes("quota") || text.includes("rate limit") || text.includes("429");
+};
+
+async function withQuotaRetry<T>(fn: () => Promise<T>): Promise<T> {
+  const delays = [400, 1000, 2200];
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (!isQuotaError(error) || attempt === delays.length) break;
+      await sleep(delays[attempt]);
+    }
+  }
+  throw lastError;
+}
+
+function parseAttendanceFileName(name: string): {
+  sourceYear: number | null;
+  employeeSlug: string;
+  legacyRootName: string;
+} {
+  const trimmed = name.trim();
+  const yearPrefixed = trimmed.match(/^(\d{4})-(.+)$/);
+  if (yearPrefixed) {
+    const parsedYear = Number.parseInt(yearPrefixed[1], 10);
+    const employeeSlug = yearPrefixed[2].trim();
+    return {
+      sourceYear: Number.isFinite(parsedYear) ? parsedYear : null,
+      employeeSlug,
+      legacyRootName: employeeSlug.split("-").join(" - ") + " - Attendance",
+    };
+  }
+
+  const legacyYearSuffixed = trimmed.match(/^(.*)\s-\s(\d{4})$/);
+  const legacyRootName = legacyYearSuffixed ? legacyYearSuffixed[1].trim() : trimmed;
+  const parsedYear = legacyYearSuffixed ? Number.parseInt(legacyYearSuffixed[2], 10) : NaN;
+  const withoutAttendance = legacyRootName.replace(/\s-\sAttendance$/i, "").trim();
+  const employeeSlug = withoutAttendance.replace(/\s*-\s*/g, "-");
+
+  return {
+    sourceYear: Number.isFinite(parsedYear) ? parsedYear : null,
+    employeeSlug,
+    legacyRootName,
+  };
+}
+
+async function getAttendanceSpreadsheetMeta(spreadsheetId: string): Promise<{
+  name: string;
+  parentFolderId: string | null;
+  employeeSlug: string;
+  legacyRootName: string;
+  sourceYear: number | null;
+}> {
+  const cached = attendanceSpreadsheetMetaCache.get(spreadsheetId);
+  if (cached) return cached;
+  const drive = await getDrive();
+  const file = await withQuotaRetry(() =>
+    drive.files.get({
+      fileId: spreadsheetId,
+      fields: "name,parents",
+      supportsAllDrives: true,
+    }),
+  );
+  const name = file.data.name ?? "Attendance";
+  const parentFolderId = file.data.parents?.[0] ?? null;
+  const parsed = parseAttendanceFileName(name);
+  const meta = {
+    name,
+    parentFolderId,
+    employeeSlug: parsed.employeeSlug,
+    legacyRootName: parsed.legacyRootName,
+    sourceYear: parsed.sourceYear,
+  };
+  attendanceSpreadsheetMetaCache.set(spreadsheetId, meta);
+  return meta;
+}
+
+async function resolveYearSpreadsheetId(
+  baseSpreadsheetId: string,
+  year: number,
+): Promise<string> {
+  const cacheKey = `${baseSpreadsheetId}:${year}`;
+  const cached = yearSpreadsheetIdCache.get(cacheKey);
+  if (cached) return cached;
+
+  const meta = await getAttendanceSpreadsheetMeta(baseSpreadsheetId);
+  const parentFolderId = meta.parentFolderId;
+  if (!parentFolderId) {
+    yearSpreadsheetIdCache.set(cacheKey, baseSpreadsheetId);
+    return baseSpreadsheetId;
+  }
+
+  if (meta.sourceYear === year) {
+    yearSpreadsheetIdCache.set(cacheKey, baseSpreadsheetId);
+    return baseSpreadsheetId;
+  }
+
+  const targetName = `${year}-${meta.employeeSlug}`;
+  if (targetName === meta.name) {
+    yearSpreadsheetIdCache.set(cacheKey, baseSpreadsheetId);
+    return baseSpreadsheetId;
+  }
+
+  const drive = await getDrive();
+  const query = [
+    "mimeType = 'application/vnd.google-apps.spreadsheet'",
+    "trashed = false",
+    `'${parentFolderId}' in parents`,
+    `name = '${targetName.replace(/'/g, "\\'")}'`,
+  ].join(" and ");
+  const existing = await withQuotaRetry(() =>
+    drive.files.list({
+      q: query,
+      fields: "files(id,createdTime)",
+      orderBy: "createdTime",
+      pageSize: 1,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    }),
+  );
+  const foundId = existing.data.files?.[0]?.id;
+  if (foundId) {
+    yearSpreadsheetIdCache.set(cacheKey, foundId);
+    return foundId;
+  }
+
+  // Backward compatibility: reuse old naming format if it already exists.
+  const legacyTargetName = `${meta.legacyRootName} - ${year}`;
+  const legacyQuery = [
+    "mimeType = 'application/vnd.google-apps.spreadsheet'",
+    "trashed = false",
+    `'${parentFolderId}' in parents`,
+    `name = '${legacyTargetName.replace(/'/g, "\\'")}'`,
+  ].join(" and ");
+  const legacyExisting = await withQuotaRetry(() =>
+    drive.files.list({
+      q: legacyQuery,
+      fields: "files(id,createdTime)",
+      orderBy: "createdTime",
+      pageSize: 1,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    }),
+  );
+  const legacyId = legacyExisting.data.files?.[0]?.id;
+  if (legacyId) {
+    yearSpreadsheetIdCache.set(cacheKey, legacyId);
+    return legacyId;
+  }
+
+  const created = await withQuotaRetry(() =>
+    drive.files.create({
+      requestBody: {
+        name: targetName,
+        mimeType: "application/vnd.google-apps.spreadsheet",
+        parents: [parentFolderId],
+      },
+      fields: "id",
+      supportsAllDrives: true,
+    }),
+  );
+  const createdId = created.data.id;
+  if (!createdId) throw new Error(`Failed to create attendance spreadsheet for year ${year}`);
+  yearSpreadsheetIdCache.set(cacheKey, createdId);
+  return createdId;
+}
+
+async function resolveSpreadsheetForDate(
+  baseSpreadsheetId: string,
+  date: Date,
+): Promise<string> {
+  const year = date.getFullYear();
+  if (!Number.isFinite(year)) return baseSpreadsheetId;
+  return resolveYearSpreadsheetId(baseSpreadsheetId, year);
+}
+
+async function listYearlySpreadsheetIds(baseSpreadsheetId: string): Promise<string[]> {
+  const meta = await getAttendanceSpreadsheetMeta(baseSpreadsheetId);
+  if (!meta.parentFolderId) return [baseSpreadsheetId];
+  const drive = await getDrive();
+  const query = [
+    "mimeType = 'application/vnd.google-apps.spreadsheet'",
+    "trashed = false",
+    `'${meta.parentFolderId}' in parents`,
+  ].join(" and ");
+
+  const yearlyFiles = await withQuotaRetry(() =>
+    drive.files.list({
+      q: query,
+      fields: "files(id,name)",
+      pageSize: 100,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    }),
+  );
+
+  const ids = new Set<string>([baseSpreadsheetId]);
+  for (const file of yearlyFiles.data.files ?? []) {
+    const name = file.name ?? "";
+    const parsed = parseAttendanceFileName(name);
+    const isLegacyPatternMatch = name.startsWith(`${meta.legacyRootName} - `);
+    if (
+      file.id &&
+      parsed.sourceYear != null &&
+      (parsed.employeeSlug === meta.employeeSlug || isLegacyPatternMatch)
+    ) {
+      ids.add(file.id);
+    }
+  }
+  return [...ids];
+}
 
 export type AttendanceRow = {
   sheetRow: number;
   date: string;
+  workMode: string;
   punchIn: string;
   punchOut: string;
   breakStart: string;
@@ -40,16 +277,20 @@ export type AttendanceRow = {
   status: string;
   overtime: string;
   earlyLeaveReason: string;
+  dailyUpdate: string;
+  isOvertimeApproved: string;
 };
 
 function applyAttendanceMetrics(rowValues: string[], baseDate: Date): void {
   const punchOut = (rowValues[ATTENDANCE_COL.punchOut] ?? "").trim();
+  const workMode = rowValues[ATTENDANCE_COL.workMode] ?? WORK_MODE.FULL_DAY_ONSITE;
   const metrics = computeAttendanceMetrics({
     punchIn: rowValues[ATTENDANCE_COL.punchIn] ?? "",
     punchOut: rowValues[ATTENDANCE_COL.punchOut] ?? "",
     totalBreakTime: rowValues[ATTENDANCE_COL.totalBreakTime] ?? "",
     baseDate,
     punchedOut: Boolean(punchOut),
+    workMode,
   });
 
   if (punchOut) {
@@ -74,11 +315,13 @@ function rowFromValues(values: string[], sheetRow: number): AttendanceRow {
     totalBreakTime: values[ATTENDANCE_COL.totalBreakTime] ?? "",
     baseDate,
     punchedOut,
+    workMode: values[ATTENDANCE_COL.workMode] ?? WORK_MODE.FULL_DAY_ONSITE,
   });
 
   return {
     sheetRow,
     date: dateStr,
+    workMode: values[ATTENDANCE_COL.workMode] ?? WORK_MODE.FULL_DAY_ONSITE,
     punchIn: values[ATTENDANCE_COL.punchIn] ?? "",
     punchOut,
     breakStart: values[ATTENDANCE_COL.breakStart] ?? "",
@@ -88,6 +331,8 @@ function rowFromValues(values: string[], sheetRow: number): AttendanceRow {
     status: punchedOut ? metrics.status : (values[ATTENDANCE_COL.status] ?? WORKING_STATUS.IN_PROGRESS),
     overtime: punchedOut ? metrics.overtime : "—",
     earlyLeaveReason: values[ATTENDANCE_COL.earlyLeaveReason] ?? "",
+    dailyUpdate: values[ATTENDANCE_COL.dailyUpdate] ?? "",
+    isOvertimeApproved: values[ATTENDANCE_COL.isOvertimeApproved] ?? "Not considered",
   };
 }
 
@@ -98,6 +343,14 @@ export function attendanceSpreadsheetFileName(
   return `${employeeId} - ${employeeName} - Attendance`;
 }
 
+function attendanceYearSpreadsheetFileName(
+  employeeId: string,
+  employeeName: string,
+  year: number = new Date().getFullYear(),
+): string {
+  return `${year}-${employeeId}-${employeeName}`;
+}
+
 /** Reuse an existing attendance file in the employee folder (avoids duplicates). */
 export async function findAttendanceSpreadsheetInFolder(
   parentFolderId: string,
@@ -105,24 +358,39 @@ export async function findAttendanceSpreadsheetInFolder(
   employeeName: string,
 ): Promise<string | null> {
   const drive = await getDrive();
-  const name = attendanceSpreadsheetFileName(employeeId, employeeName);
+  const slug = `${employeeId}-${employeeName}`.toLowerCase();
+  const legacyName = attendanceSpreadsheetFileName(employeeId, employeeName).toLowerCase();
   const query = [
     "mimeType = 'application/vnd.google-apps.spreadsheet'",
     "trashed = false",
     `'${parentFolderId}' in parents`,
-    `name = '${name.replace(/'/g, "\\'")}'`,
   ].join(" and ");
 
   const response = await drive.files.list({
     q: query,
-    fields: "files(id,createdTime)",
-    orderBy: "createdTime",
-    pageSize: 1,
+    fields: "files(id,name,createdTime)",
+    orderBy: "createdTime desc",
+    pageSize: 100,
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
   });
 
-  return response.data.files?.[0]?.id ?? null;
+  const files = response.data.files ?? [];
+  const yearPattern = /^\d{4}-.+$/;
+
+  for (const file of files) {
+    const name = (file.name ?? "").trim().toLowerCase();
+    if (!file.id || !name) continue;
+    if (yearPattern.test(name) && name.endsWith(slug)) return file.id;
+  }
+
+  for (const file of files) {
+    const name = (file.name ?? "").trim().toLowerCase();
+    if (!file.id || !name) continue;
+    if (name === legacyName) return file.id;
+  }
+
+  return null;
 }
 
 export async function getOrCreateEmployeeAttendanceSpreadsheet(
@@ -161,7 +429,7 @@ export async function createEmployeeAttendanceSpreadsheet(
   employeeName: string,
   parentFolderId: string,
 ): Promise<string> {
-  const title = attendanceSpreadsheetFileName(employeeId, employeeName);
+  const title = attendanceYearSpreadsheetFileName(employeeId, employeeName);
   const sheetName = monthlySheetTitle();
 
   try {
@@ -224,6 +492,8 @@ export async function createEmployeeAttendanceSpreadsheet(
         ATTENDANCE_HEADERS.length,
       );
     }
+    await applyWorkModeDropdownByTitle(spreadsheetId, sheetName);
+    await applyOvertimeApprovalDropdownByTitle(spreadsheetId, sheetName);
 
     return spreadsheetId;
   } catch (error) {
@@ -246,6 +516,147 @@ async function getSheetId(
     (s) => (s.properties?.title ?? "").trim().toLowerCase() === normalized,
   );
   return sheet?.properties?.sheetId ?? null;
+}
+
+async function applyWorkModeDropdownByTitle(
+  spreadsheetId: string,
+  sheetTitle: string,
+): Promise<void> {
+  const sheetsApi = await getSheetsClient();
+  const meta = await sheetsApi.spreadsheets.get({
+    spreadsheetId,
+    fields: "sheets(properties(sheetId,title),conditionalFormats)",
+  });
+  const normalized = sheetTitle.trim().toLowerCase();
+  const targetSheet = meta.data.sheets?.find(
+    (s) => (s.properties?.title ?? "").trim().toLowerCase() === normalized,
+  );
+  const sheetId = targetSheet?.properties?.sheetId;
+  if (sheetId == null) return;
+
+  const workModeColumnStart = ATTENDANCE_COL.workMode;
+  const workModeColumnEnd = ATTENDANCE_COL.workMode + 1;
+  const hasRulesAlready = (targetSheet?.conditionalFormats ?? []).some((rule) => {
+    const range = rule.ranges?.[0];
+    const condition = rule.booleanRule?.condition;
+    return (
+      range?.sheetId === sheetId &&
+      range.startColumnIndex === workModeColumnStart &&
+      range.endColumnIndex === workModeColumnEnd &&
+      condition?.type === "TEXT_EQ"
+    );
+  });
+
+  const workModeColors: Record<string, { red: number; green: number; blue: number }> = {
+    [WORK_MODE.WFH]: { red: 0.86, green: 0.93, blue: 1 },
+    [WORK_MODE.WFH_HALF_DAY]: { red: 0.82, green: 0.9, blue: 1 },
+    [WORK_MODE.FULL_DAY_LEAVE]: { red: 1, green: 0.9, blue: 0.9 },
+    [WORK_MODE.PUBLIC_HOLIDAY]: { red: 0.95, green: 0.88, blue: 1 },
+    [WORK_MODE.WEEKEND_HOLIDAY]: { red: 0.92, green: 0.92, blue: 0.92 },
+    [WORK_MODE.FULL_DAY_ONSITE]: { red: 0.86, green: 0.97, blue: 0.89 },
+    [WORK_MODE.HALF_DAY_LEAVE]: { red: 1, green: 0.95, blue: 0.83 },
+    [WORK_MODE.SL]: { red: 1, green: 0.9, blue: 0.95 },
+  };
+
+  const requests = [
+    {
+      setDataValidation: {
+        range: {
+          sheetId,
+          startRowIndex: 1,
+          startColumnIndex: workModeColumnStart,
+          endColumnIndex: workModeColumnEnd,
+        },
+        rule: {
+          condition: {
+            type: "ONE_OF_LIST",
+            values: WORK_MODE_OPTIONS.map((mode) => ({ userEnteredValue: mode })),
+          },
+          strict: true,
+          showCustomUi: true,
+        },
+      },
+    },
+    ...(!hasRulesAlready
+      ? WORK_MODE_OPTIONS.map((mode, index) => ({
+        addConditionalFormatRule: {
+          index,
+          rule: {
+            ranges: [
+              {
+                sheetId,
+                startRowIndex: 1,
+                startColumnIndex: workModeColumnStart,
+                endColumnIndex: workModeColumnEnd,
+              },
+            ],
+            booleanRule: {
+              condition: {
+                type: "TEXT_EQ",
+                values: [{ userEnteredValue: mode }],
+              },
+              format: {
+                backgroundColor: workModeColors[mode],
+                textFormat: { bold: true },
+              },
+            },
+          },
+        },
+      }))
+      : []),
+  ];
+
+  await sheetsApi.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: { requests },
+  });
+}
+
+async function applyOvertimeApprovalDropdownByTitle(
+  spreadsheetId: string,
+  sheetTitle: string,
+): Promise<void> {
+  const sheetsApi = await getSheetsClient();
+  const meta = await sheetsApi.spreadsheets.get({
+    spreadsheetId,
+    fields: "sheets(properties(sheetId,title))",
+  });
+  const normalized = sheetTitle.trim().toLowerCase();
+  const targetSheet = meta.data.sheets?.find(
+    (s) => (s.properties?.title ?? "").trim().toLowerCase() === normalized,
+  );
+  const sheetId = targetSheet?.properties?.sheetId;
+  if (sheetId == null) return;
+
+  await sheetsApi.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          setDataValidation: {
+            range: {
+              sheetId,
+              startRowIndex: 1,
+              startColumnIndex: ATTENDANCE_COL.isOvertimeApproved,
+              endColumnIndex: ATTENDANCE_COL.isOvertimeApproved + 1,
+            },
+            rule: {
+              condition: {
+                type: "ONE_OF_LIST",
+                values: [
+                  { userEnteredValue: "Accepted" },
+                  { userEnteredValue: "Rejected" },
+                  { userEnteredValue: "Not considered" },
+                ],
+              },
+              strict: true,
+              showCustomUi: true,
+            },
+          },
+        },
+      ],
+    },
+  });
 }
 
 export async function listMonthlySheets(
@@ -275,9 +686,61 @@ async function ensureAttendanceHeaderRow(
   });
   const row = response.data.values?.[0] ?? [];
   const expected = ATTENDANCE_HEADERS as unknown as string[];
+  const isLegacyWithoutWorkMode =
+    row.length === expected.length - 1 &&
+    (row[0] ?? "").trim() === "Date" &&
+    (row[1] ?? "").trim() === "Punch In";
+
+  if (isLegacyWithoutWorkMode) {
+    const sheetId = await getSheetId(spreadsheetId, sheetTitle);
+    if (sheetId != null) {
+      await sheetsApi.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [
+            {
+              insertDimension: {
+                range: {
+                  sheetId,
+                  dimension: "COLUMNS",
+                  startIndex: ATTENDANCE_COL.workMode,
+                  endIndex: ATTENDANCE_COL.workMode + 1,
+                },
+                inheritFromBefore: false,
+              },
+            },
+          ],
+        },
+      });
+
+      const dataRows = await sheetsApi.spreadsheets.values.get({
+        spreadsheetId,
+        range: `'${sheetTitle}'!A2:A`,
+      });
+      const existingDataRows = (dataRows.data.values ?? []).length;
+      if (existingDataRows > 0) {
+        await sheetsApi.spreadsheets.values.update({
+          spreadsheetId,
+          range: `'${sheetTitle}'!B2:B${existingDataRows + 1}`,
+          valueInputOption: "USER_ENTERED",
+          requestBody: {
+            values: Array.from({ length: existingDataRows }, () => [
+              WORK_MODE.FULL_DAY_ONSITE,
+            ]),
+          },
+        });
+      }
+    }
+  }
+
+  const refreshedHeader = await sheetsApi.spreadsheets.values.get({
+    spreadsheetId,
+    range: `'${sheetTitle}'!A1:${ATTENDANCE_LAST_COLUMN}1`,
+  });
+  const updatedRow = refreshedHeader.data.values?.[0] ?? [];
   const needsUpdate =
-    row.length < expected.length ||
-    expected.some((header, i) => (row[i] ?? "").trim() !== header);
+    updatedRow.length < expected.length ||
+    expected.some((header, i) => (updatedRow[i] ?? "").trim() !== header);
 
   if (needsUpdate) {
     await sheetsApi.spreadsheets.values.update({
@@ -293,6 +756,8 @@ async function ensureAttendanceHeaderRow(
     sheetTitle,
     ATTENDANCE_HEADERS.length,
   );
+  await applyWorkModeDropdownByTitle(spreadsheetId, sheetTitle);
+  await applyOvertimeApprovalDropdownByTitle(spreadsheetId, sheetTitle);
 }
 
 export async function ensureMonthlySheet(
@@ -364,6 +829,8 @@ export async function ensureMonthlySheet(
     title,
     ATTENDANCE_HEADERS.length,
   );
+  await applyWorkModeDropdownByTitle(spreadsheetId, title);
+  await applyOvertimeApprovalDropdownByTitle(spreadsheetId, title);
 
   return title;
 }
@@ -429,8 +896,9 @@ export async function getTodayAttendance(
   spreadsheetId: string,
   date: Date = new Date(),
 ): Promise<AttendanceRow | null> {
-  const sheetTitle = await ensureMonthlySheet(spreadsheetId, date);
-  const rows = await readMonthlyRows(spreadsheetId, sheetTitle);
+  const targetSpreadsheetId = await resolveSpreadsheetForDate(spreadsheetId, date);
+  const sheetTitle = await ensureMonthlySheet(targetSpreadsheetId, date);
+  const rows = await readMonthlyRows(targetSpreadsheetId, sheetTitle);
   const today = formatIsoDate(date);
   const found = findTodayRow(rows, today);
   if (!found) return null;
@@ -458,15 +926,57 @@ function buildRowValues(existing: string[] | undefined, date: Date): string[] {
   if (!normalizeSheetDate(base[ATTENDANCE_COL.date] ?? "")) {
     base[ATTENDANCE_COL.date] = formatSheetDateLiteral(date);
   }
+  if (!(base[ATTENDANCE_COL.workMode] ?? "").trim()) {
+    base[ATTENDANCE_COL.workMode] = WORK_MODE.FULL_DAY_ONSITE;
+  }
+  if (!(base[ATTENDANCE_COL.isOvertimeApproved] ?? "").trim()) {
+    base[ATTENDANCE_COL.isOvertimeApproved] = "Not considered";
+  }
   return base;
+}
+
+async function ensureSheetHasRows(
+  spreadsheetId: string,
+  sheetTitle: string,
+  requiredRow: number,
+): Promise<void> {
+  const sheetsApi = await getSheetsClient();
+  const meta = await sheetsApi.spreadsheets.get({
+    spreadsheetId,
+    fields: "sheets.properties(sheetId,title,gridProperties.rowCount)",
+  });
+  const normalized = sheetTitle.trim().toLowerCase();
+  const targetSheet = meta.data.sheets?.find(
+    (s) => (s.properties?.title ?? "").trim().toLowerCase() === normalized,
+  );
+  const sheetId = targetSheet?.properties?.sheetId;
+  const rowCount = targetSheet?.properties?.gridProperties?.rowCount ?? 0;
+  if (sheetId == null || rowCount >= requiredRow) return;
+
+  await sheetsApi.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          appendDimension: {
+            sheetId,
+            dimension: "ROWS",
+            length: requiredRow - rowCount,
+          },
+        },
+      ],
+    },
+  });
 }
 
 export async function punchIn(
   spreadsheetId: string,
   date: Date = new Date(),
+  options?: { workMode?: string },
 ): Promise<AttendanceRow> {
-  const sheetTitle = await ensureMonthlySheet(spreadsheetId, date);
-  const rows = await readMonthlyRows(spreadsheetId, sheetTitle);
+  const targetSpreadsheetId = await resolveSpreadsheetForDate(spreadsheetId, date);
+  const sheetTitle = await ensureMonthlySheet(targetSpreadsheetId, date);
+  const rows = await readMonthlyRows(targetSpreadsheetId, sheetTitle);
   const today = formatIsoDate(date);
   const found = findTodayRow(rows, today);
 
@@ -476,13 +986,21 @@ export async function punchIn(
 
   const now = formatClockTime(date);
   const rowValues = buildRowValues(found?.row, date);
+  rowValues[ATTENDANCE_COL.workMode] =
+    options?.workMode?.trim() || rowValues[ATTENDANCE_COL.workMode] || WORK_MODE.FULL_DAY_ONSITE;
   rowValues[ATTENDANCE_COL.punchIn] = now;
   rowValues[ATTENDANCE_COL.overtime] = "—";
   rowValues[ATTENDANCE_COL.status] = WORKING_STATUS.IN_PROGRESS;
+  rowValues[ATTENDANCE_COL.breakStart] = "";
+  rowValues[ATTENDANCE_COL.breakEnd] = "";
+  rowValues[ATTENDANCE_COL.totalBreakTime] = IMPORT_DEFAULT_BREAK;
+  if (rowValues[ATTENDANCE_COL.workMode] === WORK_MODE.HALF_DAY_LEAVE) {
+    rowValues[ATTENDANCE_COL.totalBreakTime] = "";
+  }
 
   const targetRow = found?.sheetRow ?? Math.max(rows.length + 1, 2);
   await updateAttendanceRow(
-    spreadsheetId,
+    targetSpreadsheetId,
     sheetTitle,
     targetRow,
     rowValues,
@@ -494,10 +1012,11 @@ export async function punchIn(
 export async function punchOut(
   spreadsheetId: string,
   date: Date = new Date(),
-  options?: { earlyLeaveReason?: string },
+  options?: { earlyLeaveReason?: string; dailyUpdate?: string },
 ): Promise<AttendanceRow> {
-  const sheetTitle = await ensureMonthlySheet(spreadsheetId, date);
-  const rows = await readMonthlyRows(spreadsheetId, sheetTitle);
+  const targetSpreadsheetId = await resolveSpreadsheetForDate(spreadsheetId, date);
+  const sheetTitle = await ensureMonthlySheet(targetSpreadsheetId, date);
+  const rows = await readMonthlyRows(targetSpreadsheetId, sheetTitle);
   const today = formatIsoDate(date);
   const found = findTodayRow(rows, today);
 
@@ -532,9 +1051,10 @@ export async function punchOut(
   } else {
     rowValues[ATTENDANCE_COL.earlyLeaveReason] = "";
   }
+  rowValues[ATTENDANCE_COL.dailyUpdate] = options?.dailyUpdate?.trim() ?? "";
 
   await updateAttendanceRow(
-    spreadsheetId,
+    targetSpreadsheetId,
     sheetTitle,
     found.sheetRow,
     rowValues,
@@ -547,8 +1067,9 @@ export async function startBreak(
   spreadsheetId: string,
   date: Date = new Date(),
 ): Promise<AttendanceRow> {
-  const sheetTitle = await ensureMonthlySheet(spreadsheetId, date);
-  const rows = await readMonthlyRows(spreadsheetId, sheetTitle);
+  const targetSpreadsheetId = await resolveSpreadsheetForDate(spreadsheetId, date);
+  const sheetTitle = await ensureMonthlySheet(targetSpreadsheetId, date);
+  const rows = await readMonthlyRows(targetSpreadsheetId, sheetTitle);
   const today = formatIsoDate(date);
   const found = findTodayRow(rows, today);
 
@@ -557,6 +1078,9 @@ export async function startBreak(
   }
   if (found.row[ATTENDANCE_COL.punchOut]?.trim()) {
     throw new Error("Cannot start a break after punch out");
+  }
+  if ((found.row[ATTENDANCE_COL.workMode] ?? "").trim() === WORK_MODE.HALF_DAY_LEAVE) {
+    throw new Error("Break is not allowed for Half Day Leave");
   }
   if (found.row[ATTENDANCE_COL.breakStart]?.trim() && !found.row[ATTENDANCE_COL.breakEnd]?.trim()) {
     throw new Error("Already on break");
@@ -569,7 +1093,7 @@ export async function startBreak(
   rowValues[ATTENDANCE_COL.breakEnd] = "";
 
   await updateAttendanceRow(
-    spreadsheetId,
+    targetSpreadsheetId,
     sheetTitle,
     found.sheetRow,
     rowValues,
@@ -582,8 +1106,9 @@ export async function endBreak(
   spreadsheetId: string,
   date: Date = new Date(),
 ): Promise<AttendanceRow> {
-  const sheetTitle = await ensureMonthlySheet(spreadsheetId, date);
-  const rows = await readMonthlyRows(spreadsheetId, sheetTitle);
+  const targetSpreadsheetId = await resolveSpreadsheetForDate(spreadsheetId, date);
+  const sheetTitle = await ensureMonthlySheet(targetSpreadsheetId, date);
+  const rows = await readMonthlyRows(targetSpreadsheetId, sheetTitle);
   const today = formatIsoDate(date);
   const found = findTodayRow(rows, today);
 
@@ -618,7 +1143,7 @@ export async function endBreak(
   rowValues[ATTENDANCE_COL.breakEnd] = "";
 
   await updateAttendanceRow(
-    spreadsheetId,
+    targetSpreadsheetId,
     sheetTitle,
     found.sheetRow,
     rowValues,
@@ -633,11 +1158,12 @@ export async function getMonthAttendance(
   monthIndex: number,
 ): Promise<AttendanceRow[]> {
   const date = new Date(year, monthIndex, 1);
+  const targetSpreadsheetId = await resolveSpreadsheetForDate(spreadsheetId, date);
   const sheetTitle = monthlySheetTitle(date);
-  const sheetId = await getSheetId(spreadsheetId, sheetTitle);
+  const sheetId = await getSheetId(targetSpreadsheetId, sheetTitle);
   if (sheetId == null) return [];
 
-  const rows = await readMonthlyRows(spreadsheetId, sheetTitle);
+  const rows = await readMonthlyRows(targetSpreadsheetId, sheetTitle);
   const records: AttendanceRow[] = [];
 
   for (let i = 1; i < rows.length; i++) {
@@ -657,8 +1183,9 @@ export async function updateAttendanceField(
 ): Promise<AttendanceRow> {
   const [year, month] = dateIso.split("-").map((p) => parseInt(p, 10));
   const date = new Date(year, (month || 1) - 1, 1);
+  const targetSpreadsheetId = await resolveSpreadsheetForDate(spreadsheetId, date);
   const sheetTitle = monthlySheetTitle(date);
-  const rows = await readMonthlyRows(spreadsheetId, sheetTitle);
+  const rows = await readMonthlyRows(targetSpreadsheetId, sheetTitle);
   const found = findTodayRow(rows, dateIso);
 
   if (!found) {
@@ -676,7 +1203,7 @@ export async function updateAttendanceField(
   }
 
   await updateAttendanceRow(
-    spreadsheetId,
+    targetSpreadsheetId,
     sheetTitle,
     found.sheetRow,
     rowValues,
@@ -685,44 +1212,182 @@ export async function updateAttendanceField(
   return rowFromValues(rowValues, found.sheetRow);
 }
 
+export async function updateDailyUpdate(
+  spreadsheetId: string,
+  dateIso: string,
+  dailyUpdate: string,
+): Promise<AttendanceRow> {
+  return updateAttendanceField(
+    spreadsheetId,
+    dateIso,
+    "dailyUpdate",
+    dailyUpdate.trim(),
+  );
+}
+
 export async function importAttendanceRecords(
   spreadsheetId: string,
-  records: Array<{ dateIso: string; punchIn: string; punchOut: string }>,
+  records: Array<{
+    dateIso: string;
+    punchIn: string;
+    punchOut: string;
+    dailyUpdate?: string;
+    workMode?: string;
+  }>,
 ): Promise<{ imported: number; updated: number }> {
+  const isHolidayMode = (mode: string): boolean => {
+    const normalized = mode.trim().toLowerCase();
+    return (
+      normalized === WORK_MODE.WEEKEND_HOLIDAY.toLowerCase() ||
+      normalized === WORK_MODE.PUBLIC_HOLIDAY.toLowerCase()
+    );
+  };
+  const isLeaveMode = (mode: string): boolean => {
+    const normalized = mode.trim().toLowerCase();
+    return (
+      normalized === WORK_MODE.FULL_DAY_LEAVE.toLowerCase() ||
+      normalized === WORK_MODE.HALF_DAY_LEAVE.toLowerCase() ||
+      normalized === WORK_MODE.HALF_DAY_PAID_LEAVE.toLowerCase() ||
+      normalized === WORK_MODE.HALF_DAY_UNPAID_LEAVE.toLowerCase() ||
+      normalized === WORK_MODE.PAID_LEAVE.toLowerCase() ||
+      normalized === WORK_MODE.SICK_LEAVE.toLowerCase() ||
+      normalized === WORK_MODE.CASUAL_LEAVE.toLowerCase() ||
+      normalized === WORK_MODE.UNPAID_LEAVE.toLowerCase() ||
+      normalized === WORK_MODE.SL.toLowerCase()
+    );
+  };
   let imported = 0;
   let updated = 0;
+  if (!records.length) return { imported, updated };
 
+  const grouped = new Map<string, { targetSpreadsheetId: string; records: typeof records }>();
   for (const record of records) {
-    const baseDate = new Date(record.dateIso);
-    const sheetTitle = await ensureMonthlySheet(spreadsheetId, baseDate);
-    const existingRows = await readMonthlyRows(spreadsheetId, sheetTitle);
-    const found = findTodayRow(existingRows, record.dateIso);
-
-    const rowValues = buildRowValues(found?.row, baseDate);
-    rowValues[ATTENDANCE_COL.punchIn] = record.punchIn;
-    rowValues[ATTENDANCE_COL.punchOut] = record.punchOut;
-    rowValues[ATTENDANCE_COL.breakStart] = "";
-    rowValues[ATTENDANCE_COL.breakEnd] = "";
-    rowValues[ATTENDANCE_COL.totalBreakTime] = IMPORT_DEFAULT_BREAK;
-
-    if (record.punchOut.trim()) {
-      applyAttendanceMetrics(rowValues, baseDate);
-    } else {
-      rowValues[ATTENDANCE_COL.overtime] = "—";
-      rowValues[ATTENDANCE_COL.status] = WORKING_STATUS.IN_PROGRESS;
-      rowValues[ATTENDANCE_COL.workingHours] = "";
-    }
-
-    const targetRow = found?.sheetRow ?? Math.max(existingRows.length + 1, 2);
-    await updateAttendanceRow(spreadsheetId, sheetTitle, targetRow, rowValues);
-
-    if (found) updated++;
-    else imported++;
+    const [year, month] = record.dateIso.split("-");
+    const yearNum = parseInt(year, 10);
+    const targetSpreadsheetId =
+      Number.isFinite(yearNum) ? await resolveYearSpreadsheetId(spreadsheetId, yearNum) : spreadsheetId;
+    const key = `${targetSpreadsheetId}:${year}-${month}`;
+    const group = grouped.get(key) ?? { targetSpreadsheetId, records: [] };
+    const list = group.records;
+    list.push(record);
+    grouped.set(key, group);
   }
 
-  await formatAllAttendanceMonthlyHeaders(spreadsheetId);
+  const sheetsApi = await getSheetsClient();
+
+  for (const group of grouped.values()) {
+    const { targetSpreadsheetId, records: monthRecords } = group;
+    const sampleDate = new Date(monthRecords[0].dateIso);
+    const sheetTitle = await withQuotaRetry(() =>
+      ensureMonthlySheet(targetSpreadsheetId, sampleDate),
+    );
+    const existingRows = await withQuotaRetry(() =>
+      readMonthlyRows(targetSpreadsheetId, sheetTitle),
+    );
+    const rowIndexByDate = new Map<string, number>();
+    for (let i = 1; i < existingRows.length; i++) {
+      const dateIso = normalizeSheetDate(existingRows[i]?.[ATTENDANCE_COL.date] ?? "");
+      if (dateIso) rowIndexByDate.set(dateIso, i + 1);
+    }
+
+    let nextRow = Math.max(existingRows.length + 1, 2);
+    const data: Array<{ range: string; values: string[][] }> = [];
+    for (const record of monthRecords) {
+      const baseDate = new Date(record.dateIso);
+      const existingSheetRow = rowIndexByDate.get(record.dateIso);
+      const existing = existingSheetRow != null ? existingRows[existingSheetRow - 1] : undefined;
+      const rowValues = buildRowValues(existing, baseDate);
+      rowValues[ATTENDANCE_COL.workMode] =
+        record.workMode?.trim() || rowValues[ATTENDANCE_COL.workMode] || WORK_MODE.FULL_DAY_ONSITE;
+      rowValues[ATTENDANCE_COL.punchIn] = record.punchIn;
+      rowValues[ATTENDANCE_COL.punchOut] = record.punchOut;
+      rowValues[ATTENDANCE_COL.dailyUpdate] = record.dailyUpdate?.trim() ?? "";
+      rowValues[ATTENDANCE_COL.breakStart] = "";
+      rowValues[ATTENDANCE_COL.breakEnd] = "";
+      rowValues[ATTENDANCE_COL.totalBreakTime] =
+        rowValues[ATTENDANCE_COL.workMode] === WORK_MODE.HALF_DAY_LEAVE ? "" : IMPORT_DEFAULT_BREAK;
+
+      const hasIn = record.punchIn.trim().length > 0;
+      const hasOut = record.punchOut.trim().length > 0;
+      const normalizedMode = rowValues[ATTENDANCE_COL.workMode] ?? "";
+      if (isHolidayMode(normalizedMode)) {
+        rowValues[ATTENDANCE_COL.breakStart] = "";
+        rowValues[ATTENDANCE_COL.breakEnd] = "";
+        rowValues[ATTENDANCE_COL.totalBreakTime] = "";
+        rowValues[ATTENDANCE_COL.workingHours] = "";
+        rowValues[ATTENDANCE_COL.status] = "";
+        rowValues[ATTENDANCE_COL.overtime] = "";
+      } else if (isLeaveMode(normalizedMode) && !hasIn && !hasOut) {
+        rowValues[ATTENDANCE_COL.breakStart] = "";
+        rowValues[ATTENDANCE_COL.breakEnd] = "";
+        rowValues[ATTENDANCE_COL.totalBreakTime] = "";
+        rowValues[ATTENDANCE_COL.workingHours] = "";
+        rowValues[ATTENDANCE_COL.status] = WORKING_STATUS.ON_LEAVE;
+        rowValues[ATTENDANCE_COL.overtime] = "";
+      } else if (!hasIn && !hasOut) {
+        rowValues[ATTENDANCE_COL.breakStart] = "";
+        rowValues[ATTENDANCE_COL.breakEnd] = "";
+        rowValues[ATTENDANCE_COL.totalBreakTime] = "";
+        rowValues[ATTENDANCE_COL.workingHours] = "";
+        rowValues[ATTENDANCE_COL.status] = "";
+        rowValues[ATTENDANCE_COL.overtime] = "";
+      } else if (hasOut) {
+        applyAttendanceMetrics(rowValues, baseDate);
+      } else {
+        rowValues[ATTENDANCE_COL.overtime] = "—";
+        rowValues[ATTENDANCE_COL.status] = WORKING_STATUS.IN_PROGRESS;
+        rowValues[ATTENDANCE_COL.workingHours] = "";
+      }
+
+      const targetRow = existingSheetRow ?? nextRow++;
+      data.push({
+        range: `'${sheetTitle}'!A${targetRow}:${ATTENDANCE_LAST_COLUMN}${targetRow}`,
+        values: [rowValues],
+      });
+
+      if (existingSheetRow != null) updated++;
+      else imported++;
+    }
+
+    const maxTargetRow = data.reduce((max, entry) => {
+      const match = entry.range.match(/!A(\d+):/);
+      const row = match ? Number.parseInt(match[1], 10) : 0;
+      return Math.max(max, row);
+    }, 0);
+    if (maxTargetRow > 0) {
+      await withQuotaRetry(() =>
+        ensureSheetHasRows(targetSpreadsheetId, sheetTitle, maxTargetRow),
+      );
+    }
+
+    await withQuotaRetry(() =>
+      sheetsApi.spreadsheets.values.batchUpdate({
+        spreadsheetId: targetSpreadsheetId,
+        requestBody: {
+          valueInputOption: "USER_ENTERED",
+          data,
+        },
+      }),
+    );
+  }
+
+  for (const targetSpreadsheetId of new Set(grouped.values().map((g) => g.targetSpreadsheetId))) {
+    await withQuotaRetry(() => formatAllAttendanceMonthlyHeaders(targetSpreadsheetId));
+  }
 
   return { imported, updated };
+}
+
+export async function listAttendanceMonthlySheetsAcrossYears(
+  spreadsheetId: string,
+): Promise<string[]> {
+  const spreadsheetIds = await listYearlySpreadsheetIds(spreadsheetId);
+  const unique = new Set<string>();
+  for (const targetSpreadsheetId of spreadsheetIds) {
+    const titles = await listMonthlySheets(targetSpreadsheetId);
+    for (const title of titles) unique.add(title);
+  }
+  return [...unique];
 }
 
 export function computeLiveWorkedMs(
@@ -740,15 +1405,20 @@ export function computeLiveWorkedMs(
       totalBreakTime: record.totalBreakTime,
       baseDate,
       punchedOut: true,
+      workMode: record.workMode,
     }).workingMs;
   }
 
   const punchInMs = parseSheetClockTime(record.punchIn, baseDate, { role: "in" });
   if (punchInMs == null) return 0;
 
-  let totalBreakMs = parseDurationToMs(record.totalBreakTime);
+  const skipBreak = record.workMode === WORK_MODE.HALF_DAY_LEAVE;
+  let totalBreakMs = resolveAttendanceBreakMs(
+    record.totalBreakTime,
+    record.workMode,
+  );
 
-  if (record.breakStart.trim() && !record.breakEnd.trim()) {
+  if (!skipBreak && record.breakStart.trim() && !record.breakEnd.trim()) {
     const breakStartMs = parseSheetClockTime(record.breakStart, baseDate, {
       punchIn: record.punchIn,
       role: "out",

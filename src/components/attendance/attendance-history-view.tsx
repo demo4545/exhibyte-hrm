@@ -174,11 +174,26 @@ export function AttendanceHistoryView({
             </h1>
             <p className="mt-1 max-w-xl text-sm text-ex-muted">
               {isHr
-                ? "Review punch times, work hours, and early leave notes. Import legacy CSV when needed."
-                : `Monthly log of punch in/out, break, and ${IDEAL_WORKING_HOURS}h work target.`}
+                ? "Review punch times, work hours, and daily updates. Import legacy CSV when needed."
+                : `Monthly log of punch in/out, break, daily updates, and ${IDEAL_WORKING_HOURS}h work target.`}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {isHr ? (
+              <Badge
+                variant="default"
+                className="max-w-[240px] overflow-hidden text-ellipsis whitespace-nowrap"
+                title={
+                  selectedEmployee
+                    ? `Target: ${selectedEmployee.name}${selectedEmployee.employeeId ? ` (${selectedEmployee.employeeId})` : ""}`
+                    : "Target: Select employee"
+                }
+              >
+                {selectedEmployee
+                  ? `Target: ${selectedEmployee.name}${selectedEmployee.employeeId ? ` (${selectedEmployee.employeeId})` : ""}`
+                  : "Target: Select employee"}
+              </Badge>
+            ) : null}
             {isHr ? (
               <Button
                 variant="outline"
@@ -186,6 +201,11 @@ export function AttendanceHistoryView({
                 className="gap-2 bg-ex-elevated/80"
                 disabled={importing || selectedSheetRow == null}
                 onClick={onImportClick}
+                title={
+                  selectedEmployee
+                    ? `Import attendance CSV for ${selectedEmployee.name}`
+                    : "Select an employee to import attendance CSV"
+                }
               >
                 {importing ? (
                   <Loader2 className="size-4 animate-spin" />
@@ -201,9 +221,14 @@ export function AttendanceHistoryView({
               className="gap-2 bg-ex-elevated/80"
               disabled={!canExport}
               onClick={onExport}
+              title={
+                isHr && selectedEmployee
+                  ? `Export attendance CSV for ${selectedEmployee.name}`
+                  : "Export attendance CSV"
+              }
             >
               <Download className="size-4" />
-              Export
+              Export CSV
             </Button>
           </div>
         </div>
@@ -266,12 +291,6 @@ export function AttendanceHistoryView({
           </div>
         </div>
 
-        {selectedEmployee && isHr ? (
-          <p className="mt-2 text-xs text-ex-muted">
-            Viewing{" "}
-            <span className="font-medium text-ex-primary">{selectedEmployee.name}</span>
-          </p>
-        ) : null}
       </div>
 
       {importMessage ? (
@@ -367,6 +386,13 @@ export function AttendanceHistoryView({
               ),
             },
             {
+              key: "workMode",
+              header: "Work mode",
+              sortable: true,
+              className: "min-w-[150px] whitespace-normal",
+              render: (r) => r.workMode?.trim() || <span className="text-ex-muted">—</span>,
+            },
+            {
               key: "punchIn",
               header: "In",
               sortable: true,
@@ -408,11 +434,25 @@ export function AttendanceHistoryView({
               key: "earlyLeaveReason",
               header: "Early leave reason",
               sortable: false,
-              className: "max-w-[220px] whitespace-normal",
+              className: "min-w-[150px] max-w-[220px] whitespace-normal",
               render: (r) =>
                 r.earlyLeaveReason?.trim() ? (
                   <span className="line-clamp-2 text-sm text-ex-muted" title={r.earlyLeaveReason}>
                     {r.earlyLeaveReason}
+                  </span>
+                ) : (
+                  <span className="text-ex-muted">—</span>
+                ),
+            },
+            {
+              key: "dailyUpdate",
+              header: "Daily update",
+              sortable: false,
+              className: "min-w-[150px] max-w-[280px] whitespace-normal",
+              render: (r) =>
+                r.dailyUpdate?.trim() ? (
+                  <span className="line-clamp-2 text-sm text-ex-muted" title={r.dailyUpdate}>
+                    {r.dailyUpdate}
                   </span>
                 ) : (
                   <span className="text-ex-muted">—</span>

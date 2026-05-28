@@ -15,9 +15,21 @@ import { canManageEmployees } from "@/lib/auth/roles";
 import { parseEmployeeListApiResponse } from "@/lib/employee/list";
 import type { Employee } from "@/types/employee";
 
-function exportCsv(rows: AttendanceHistoryRow[]) {
+function safeFilePart(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-zA-Z0-9-_]/g, "")
+    .toLowerCase();
+}
+
+function exportCsv(
+  rows: AttendanceHistoryRow[],
+  options?: { employeeName?: string; employeeId?: string; month?: number | null; year?: number | null },
+) {
   const headers = [
     "Date",
+    "Work Mode",
     "Punch In",
     "Punch Out",
     "Break Time",
@@ -25,12 +37,14 @@ function exportCsv(rows: AttendanceHistoryRow[]) {
     "Overtime",
     "Status",
     "Early Leave Reason",
+    "Daily Update",
   ];
   const lines = [
     headers.join(","),
     ...rows.map((r) =>
       [
         r.date,
+        r.workMode ?? "",
         r.punchIn,
         r.punchOut,
         r.breakTime,
@@ -38,6 +52,7 @@ function exportCsv(rows: AttendanceHistoryRow[]) {
         r.overtime,
         r.status,
         r.earlyLeaveReason ?? "",
+        r.dailyUpdate ?? "",
       ]
         .map((v) => `"${String(v).replace(/"/g, '""')}"`)
         .join(","),
@@ -47,7 +62,16 @@ function exportCsv(rows: AttendanceHistoryRow[]) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `attendance-${Date.now()}.csv`;
+  const employeePart = options?.employeeName
+    ? safeFilePart(options.employeeName)
+    : "employee";
+  const employeeIdPart = options?.employeeId ? safeFilePart(options.employeeId) : "";
+  const monthPart =
+    options?.year != null && options?.month != null
+      ? `${options.year}-${String(options.month).padStart(2, "0")}`
+      : "all-months";
+  const parts = ["attendance", employeePart, employeeIdPart, monthPart].filter(Boolean);
+  a.download = `${parts.join("-")}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -137,6 +161,10 @@ export default function AttendanceHistoryPage() {
     () => [...rows].sort((a, b) => b.date.localeCompare(a.date)),
     [rows],
   );
+  const selectedEmployee = useMemo(
+    () => employees.find((e) => Number(e.sheetRow) === targetSheetRow) ?? null,
+    [employees, targetSheetRow],
+  );
 
   async function handleImportFile(file: File) {
     if (targetSheetRow == null) return;
@@ -149,7 +177,11 @@ export default function AttendanceHistoryPage() {
         result.holidaysSkipped > 0
           ? ` (${result.holidaysSkipped} weekend/holiday rows skipped)`
           : "";
-      setImportMessage(`${result.message}${extra}`);
+      const employeeLabel =
+        result.employee?.employeeName ??
+        selectedEmployee?.name ??
+        (isHr ? `sheet row ${targetSheetRow}` : "your account");
+      setImportMessage(`${result.message}${extra} For: ${employeeLabel}.`);
       await loadPeriods();
       if (year != null && month != null) {
         await loadHistory();
@@ -197,7 +229,14 @@ export default function AttendanceHistoryPage() {
         error={error}
         importMessage={importMessage}
         onImportClick={() => fileInputRef.current?.click()}
-        onExport={() => exportCsv(sortedRows)}
+        onExport={() =>
+          exportCsv(sortedRows, {
+            employeeName: selectedEmployee?.name,
+            employeeId: selectedEmployee?.employeeId,
+            month,
+            year,
+          })
+        }
         canExport={rows.length > 0}
       />
     </div>

@@ -72,7 +72,7 @@ export function WorkTimer({
           <p className="text-[10px] font-semibold uppercase tracking-wider text-ex-muted">
             {label}
           </p>
-          <p className="mt-0.5 font-mono text-xl font-bold tabular-nums text-ex-primary">
+          <p className="mt-0.5 font-mono text-lg font-bold tabular-nums text-ex-primary">
             {formatDurationHms(workedMs)}
           </p>
           <p className="mt-1 text-[11px] text-ex-muted">

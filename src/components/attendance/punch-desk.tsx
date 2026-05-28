@@ -19,11 +19,11 @@ import {
   IDEAL_BREAK_HOURS,
   IDEAL_SHIFT_HOURS,
   IDEAL_WORKING_HOURS,
+  WORK_MODE,
 } from "@/lib/attendance/constants";
 import {
   formatBreakAllowance,
   parseDurationToMs,
-  parseTimeOnDate,
 } from "@/lib/attendance/time";
 import type { TodayAttendance } from "@/lib/attendance/client";
 import { cn } from "@/lib/utils";
@@ -223,6 +223,7 @@ export function PunchDesk({
   const hasPunchedIn = today?.hasPunchedIn ?? false;
   const hasPunchedOut = today?.hasPunchedOut ?? false;
   const onBreak = today?.onBreak ?? false;
+  const isHalfDayLeave = today?.workMode === WORK_MODE.HALF_DAY_LEAVE;
   const phase = getPhase(today, hasPunchedIn, hasPunchedOut, onBreak);
   const dayOutcome = getDayOutcome(today);
   const shortfallAmount = parseShortfallAmount(today?.overtime);
@@ -249,14 +250,7 @@ export function PunchDesk({
           : { label: "Overtime", value: "—", tone: "default" as const };
 
   const breakUsedMs =
-    parseDurationToMs(today?.totalBreakTime ?? "") +
-    (onBreak && today?.breakStart
-      ? Math.max(
-          0,
-          Date.now() -
-            (parseTimeOnDate(today.breakStart, new Date(today.date)) ?? Date.now()),
-        )
-      : 0);
+    parseDurationToMs(today?.totalBreakTime ?? "");
 
   return (
     <div className="overflow-hidden rounded-2xl border border-ex-border bg-ex-elevated shadow-sm dark:shadow-none">
@@ -356,8 +350,10 @@ export function PunchDesk({
             label="Break"
             value={
               hasPunchedIn
-                ? formatBreakAllowance(breakUsedMs)
-                : `0h / ${IDEAL_BREAK_HOURS}h`
+                ? isHalfDayLeave
+                  ? "Not allowed"
+                  : formatBreakAllowance(breakUsedMs)
+                : `0h / ${today?.idealBreakHours ?? IDEAL_BREAK_HOURS}h`
             }
           />
           <StatPill
@@ -424,7 +420,7 @@ export function PunchDesk({
                 size="lg"
                 variant="outline"
                 className="h-12 gap-2 border-amber-300/60 bg-amber-50/80 text-amber-900 hover:bg-amber-100 dark:border-amber-700/50 dark:bg-amber-950/40 dark:text-amber-100"
-                disabled={acting || loading}
+                disabled={acting || loading || isHalfDayLeave}
                 onClick={onBreakStart}
               >
                 {acting ? (
@@ -495,10 +491,9 @@ export function PunchDesk({
 
         {hasPunchedIn && !hasPunchedOut ? (
           <p className="text-center text-xs text-ex-muted sm:text-left">
-            Your day: <strong className="text-ex-primary">{IDEAL_WORKING_HOURS}h work</strong>
-            {" "}+ <strong className="text-ex-primary">{IDEAL_BREAK_HOURS}h break</strong>
-            {" "}= {IDEAL_SHIFT_HOURS}h on site. Only work hours count toward your goal — break
-            never reduces them.
+            Your day: <strong className="text-ex-primary">{today?.idealHours ?? IDEAL_WORKING_HOURS}h work</strong>
+            {" "}+ <strong className="text-ex-primary">{today?.idealBreakHours ?? IDEAL_BREAK_HOURS}h break</strong>
+            {" "}= {today?.idealShiftHours ?? IDEAL_SHIFT_HOURS}h target.
           </p>
         ) : null}
       </div>

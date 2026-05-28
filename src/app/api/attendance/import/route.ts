@@ -67,6 +67,8 @@ export const POST = withActiveSession(async (req, user) => {
         dateIso: r.dateIso,
         punchIn: r.punchIn,
         punchOut: r.punchOut,
+        dailyUpdate: r.dailyUpdate,
+        workMode: r.workMode,
       }));
 
     const result = await importAttendanceRecords(

@@ -16,6 +16,7 @@ import {
   createEmployeeFolderStructure,
   getParentFolderId,
 } from "@/lib/google/drive";
+import { getDrive } from "@/lib/google/drive-auth";
 import {
   EMPLOYEE_SHEET_RANGE,
   getSheetHeadersData,
@@ -59,6 +60,22 @@ export function getAttendanceSpreadsheetIdFromRow(
   return fallbackIndex >= 0 ? String(row[fallbackIndex] ?? "").trim() : "";
 }
 
+async function isActiveSpreadsheet(spreadsheetId: string): Promise<boolean> {
+  const trimmed = spreadsheetId.trim();
+  if (!trimmed) return false;
+  try {
+    const drive = await getDrive();
+    const file = await drive.files.get({
+      fileId: trimmed,
+      fields: "id,trashed",
+      supportsAllDrives: true,
+    });
+    return Boolean(file.data.id) && file.data.trashed !== true;
+  } catch {
+    return false;
+  }
+}
+
 export async function resolveAttendanceEmployee(
   user: SessionUser,
 ): Promise<AttendanceEmployeeContext | null> {
@@ -72,6 +89,9 @@ export async function resolveAttendanceEmployee(
     record.headers,
     record.row,
   );
+  if (attendanceSpreadsheetId && !(await isActiveSpreadsheet(attendanceSpreadsheetId))) {
+    attendanceSpreadsheetId = "";
+  }
 
   const parentFolderId = await resolveEmployeeFolderId(form.documentsFolderId, {
     employeeId,
@@ -167,6 +187,9 @@ export async function resolveAttendanceEmployeeForTarget(
   const employeeName = form.name.trim() || "Employee";
 
   let attendanceSpreadsheetId = getAttendanceSpreadsheetIdFromRow(headers, row);
+  if (attendanceSpreadsheetId && !(await isActiveSpreadsheet(attendanceSpreadsheetId))) {
+    attendanceSpreadsheetId = "";
+  }
   const parentFolderId = await resolveEmployeeFolderId(form.documentsFolderId, {
     employeeId,
     employeeName,

@@ -21,7 +21,7 @@ import {
 } from "@/lib/employee";
 import { POSITIONS, ROLES } from "@/app/consts/common";
 import { useAuth } from "@/contexts/auth-provider";
-import { canViewEmployeeSalary } from "@/lib/auth/roles";
+import { canManageEmployees } from "@/lib/auth/roles";
 import {
   ALL_TECH_SKILLS,
   joinSkillsValue,
@@ -58,12 +58,28 @@ function FormField({
 export type EmployeeFormProps = {
   mode: "add" | "edit";
   sheetRow?: number;
+  successRedirectPath?: string;
+  cancelHref?: string;
+  onSaved?: () => void;
+  onCancel?: () => void;
+  useOwnProfileEndpoint?: boolean;
 };
 
-export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
+export function EmployeeForm({
+  mode,
+  sheetRow,
+  successRedirectPath = "/employee",
+  cancelHref = "/employee",
+  onSaved,
+  onCancel,
+  useOwnProfileEndpoint = false,
+}: EmployeeFormProps) {
   const router = useRouter();
   const { user } = useAuth();
-  const canViewSalary = user ? canViewEmployeeSalary(user.role) : false;
+  const canManage = user ? canManageEmployees(user.role) : false;
+  const canEditRole =
+    user?.role === ROLES.HR_MANAGER || user?.role === ROLES.SUPER_ADMIN;
+  const canEditLastIncrement = user?.role !== ROLES.EMPLOYEE;
   const isEdit = mode === "edit";
 
   const [form, setForm] = useState<EmployeeFormState>(initialEmployeeForm);
@@ -86,7 +102,7 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
 
   useEffect(() => {
     void loadForm();
-  }, [mode, sheetRow]);
+  }, [mode, sheetRow, useOwnProfileEndpoint]);
 
   useEffect(() => {
     return () => {
@@ -112,6 +128,21 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
       }
       setError(null);
       clearProfileImagePreview();
+
+      if (isEdit && useOwnProfileEndpoint) {
+        const response = await fetch("/api/employee/me");
+        const result = await response.json();
+
+        if (!result.success) {
+          setError(result.message || "Employee not found");
+          return;
+        }
+
+        const headers = (result.headers as string[]) ?? [];
+        setSheetHeaders(headers);
+        setForm(sheetRowToForm(headers, (result.row as string[]) ?? []));
+        return;
+      }
 
       if (isEdit && sheetRow) {
         const response = await fetch(`/api/employee?row=${sheetRow}`);
@@ -229,7 +260,11 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
           window.alert(lines.join("\n"));
         }
 
-        router.push("/employee");
+        if (onSaved) {
+          onSaved();
+        } else {
+          router.push(successRedirectPath);
+        }
         return;
       }
 
@@ -281,6 +316,7 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
                   id="role"
                   value={form.role}
                   onChange={update("role")}
+                  disabled={isEdit && !canEditRole}
                   required
                 >
                   <option value="">Select Role</option>
@@ -314,67 +350,69 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Documents</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-4 sm:grid-cols-2">
-              <FormField label="PAN number" id="panNumber">
-                <Input
-                  id="panNumber"
-                  value={form.panNumber}
-                  onChange={update("panNumber")}
-                  placeholder="AAAAA9999A"
-                  autoComplete="off"
-                />
-                {form.panNumber ? (
-                  <p className="text-xs text-ex-muted">
-                    Displayed as {maskPan(form.panNumber)}
-                  </p>
-                ) : null}
-              </FormField>
+          {!isEdit ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Documents</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-4 sm:grid-cols-2">
+                <FormField label="PAN number" id="panNumber">
+                  <Input
+                    id="panNumber"
+                    value={form.panNumber}
+                    onChange={update("panNumber")}
+                    placeholder="AAAAA9999A"
+                    autoComplete="off"
+                  />
+                  {form.panNumber ? (
+                    <p className="text-xs text-ex-muted">
+                      Displayed as {maskPan(form.panNumber)}
+                    </p>
+                  ) : null}
+                </FormField>
 
-              <FormField label="Aadhaar number" id="aadharNumber">
-                <Input
-                  id="aadharNumber"
-                  value={form.aadharNumber}
-                  onChange={update("aadharNumber")}
-                  placeholder="12-digit Aadhaar"
-                  inputMode="numeric"
-                  autoComplete="off"
-                />
-                {form.aadharNumber ? (
-                  <p className="text-xs text-ex-muted">
-                    Displayed as {maskAadhar(form.aadharNumber)}
-                  </p>
-                ) : null}
-              </FormField>
+                <FormField label="Aadhaar number" id="aadharNumber">
+                  <Input
+                    id="aadharNumber"
+                    value={form.aadharNumber}
+                    onChange={update("aadharNumber")}
+                    placeholder="12-digit Aadhaar"
+                    inputMode="numeric"
+                    autoComplete="off"
+                  />
+                  {form.aadharNumber ? (
+                    <p className="text-xs text-ex-muted">
+                      Displayed as {maskAadhar(form.aadharNumber)}
+                    </p>
+                  ) : null}
+                </FormField>
 
-              <FormField label="PAN card (upload)" id="pancard">
-                <FileUploaderField
-                  id="pancard"
-                  fileName={form.pancard}
-                  onChange={handleFile("pancard")}
-                />
-              </FormField>
+                <FormField label="PAN card (upload)" id="pancard">
+                  <FileUploaderField
+                    id="pancard"
+                    fileName={form.pancard}
+                    onChange={handleFile("pancard")}
+                  />
+                </FormField>
 
-              <FormField label="Aadhaar card (upload)" id="aadharCard">
-                <FileUploaderField
-                  id="aadharCard"
-                  fileName={form.aadharCard}
-                  onChange={handleFile("aadharCard")}
-                />
-              </FormField>
+                <FormField label="Aadhaar card (upload)" id="aadharCard">
+                  <FileUploaderField
+                    id="aadharCard"
+                    fileName={form.aadharCard}
+                    onChange={handleFile("aadharCard")}
+                  />
+                </FormField>
 
-              <FormField label="Marksheet" id="marksheet">
-                <FileUploaderField
-                  id="marksheet"
-                  fileName={form.marksheet}
-                  onChange={handleFile("marksheet")}
-                />
-              </FormField>
-            </CardContent>
-          </Card>
+                <FormField label="Marksheet" id="marksheet">
+                  <FileUploaderField
+                    id="marksheet"
+                    fileName={form.marksheet}
+                    onChange={handleFile("marksheet")}
+                  />
+                </FormField>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader>
@@ -560,11 +598,12 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
                       onChange={(lastIncrementDate) =>
                         setForm((prev) => ({ ...prev, lastIncrementDate }))
                       }
+                      disabled={!canEditLastIncrement}
                     />
                   </FormField>
                 </div>
 
-                {canViewSalary ? (
+                {canManage ? (
                   <div className="space-y-2 sm:col-span-2">
                     <FormField label="Salary (monthly)" id="salary">
                       <Input
@@ -583,18 +622,26 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
                   </div>
                 ) : null}
 
-                <FormField label="Tech skills" id="skills" className="sm:col-span-2">
-                  <MultiSelect
-                    id="skills"
-                    options={[...ALL_TECH_SKILLS]}
-                    value={parseSkillsValue(form.skills)}
-                    onChange={(skills) =>
-                      setForm((prev) => ({ ...prev, skills: joinSkillsValue(skills) }))
-                    }
-                    placeholder="Select tech skills"
-                  />
-                </FormField>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Skills</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <FormField label="Tech skills" id="skills">
+                <MultiSelect
+                  id="skills"
+                  options={[...ALL_TECH_SKILLS]}
+                  value={parseSkillsValue(form.skills)}
+                  onChange={(skills) =>
+                    setForm((prev) => ({ ...prev, skills: joinSkillsValue(skills) }))
+                  }
+                  placeholder="Select tech skills"
+                />
+              </FormField>
             </CardContent>
           </Card>
         </div>
@@ -613,11 +660,22 @@ export function EmployeeForm({ mode, sheetRow }: EmployeeFormProps) {
 
         </Button>
 
-        <Link href="/employee">
-          <Button type="button" variant="ghost" disabled={submitting}>
+        {onCancel ? (
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={submitting}
+            onClick={onCancel}
+          >
             Cancel
           </Button>
-        </Link>
+        ) : (
+          <Link href={cancelHref}>
+            <Button type="button" variant="ghost" disabled={submitting}>
+              Cancel
+            </Button>
+          </Link>
+        )}
       </div>
     </form>
   );

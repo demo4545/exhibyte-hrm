@@ -12,6 +12,7 @@ export const IDEAL_SHIFT_HOURS = IDEAL_WORKING_HOURS + IDEAL_BREAK_HOURS;
 
 export const ATTENDANCE_HEADERS = [
   "Date",
+  "Work Mode",
   "Punch In",
   "Punch Out",
   "Break Start",
@@ -21,25 +22,66 @@ export const ATTENDANCE_HEADERS = [
   "Status",
   "Overtime",
   "Early Leave Reason",
+  "Daily Update",
+  "Is Overtime Approved",
 ] as const;
 
-/** Last column letter for attendance row ranges (A through J). */
-export const ATTENDANCE_LAST_COLUMN = "J";
+/** Last column letter for attendance row ranges (A through M). */
+export const ATTENDANCE_LAST_COLUMN = "M";
 
 export type AttendanceColumn = (typeof ATTENDANCE_HEADERS)[number];
 
 export const ATTENDANCE_COL = {
   date: 0,
-  punchIn: 1,
-  punchOut: 2,
-  breakStart: 3,
-  breakEnd: 4,
-  totalBreakTime: 5,
-  workingHours: 6,
-  status: 7,
-  overtime: 8,
-  earlyLeaveReason: 9,
+  workMode: 1,
+  punchIn: 2,
+  punchOut: 3,
+  breakStart: 4,
+  breakEnd: 5,
+  totalBreakTime: 6,
+  workingHours: 7,
+  status: 8,
+  overtime: 9,
+  earlyLeaveReason: 10,
+  dailyUpdate: 11,
+  isOvertimeApproved: 12,
 } as const;
+
+export const WORK_MODE = {
+  WFH: "WFH",
+  WFH_HALF_DAY: "WFH - HD",
+  FULL_DAY_LEAVE: "Full Day Leave",
+  PAID_LEAVE: "Paid Leave",
+  SICK_LEAVE: "Sick Leave",
+  CASUAL_LEAVE: "Casual Leave",
+  UNPAID_LEAVE: "Unpaid Leave",
+  HALF_DAY_PAID_LEAVE: "Half Day Paid Leave",
+  HALF_DAY_UNPAID_LEAVE: "Half Day Unpaid Leave",
+  PUBLIC_HOLIDAY: "Public Holiday",
+  WEEKEND_HOLIDAY: "Weekend Holiday",
+  FULL_DAY_ONSITE: "Full Day Onsite",
+  HALF_DAY_LEAVE: "Half Day Leave",
+  SL: "SL",
+} as const;
+
+export const WORK_MODE_OPTIONS = [
+  WORK_MODE.WFH,
+  WORK_MODE.WFH_HALF_DAY,
+  WORK_MODE.FULL_DAY_LEAVE,
+  WORK_MODE.PAID_LEAVE,
+  WORK_MODE.SICK_LEAVE,
+  WORK_MODE.CASUAL_LEAVE,
+  WORK_MODE.UNPAID_LEAVE,
+  WORK_MODE.HALF_DAY_PAID_LEAVE,
+  WORK_MODE.HALF_DAY_UNPAID_LEAVE,
+  WORK_MODE.PUBLIC_HOLIDAY,
+  WORK_MODE.WEEKEND_HOLIDAY,
+  WORK_MODE.FULL_DAY_ONSITE,
+  WORK_MODE.HALF_DAY_LEAVE,
+  WORK_MODE.SL,
+] as const;
+
+export type WorkMode = (typeof WORK_MODE_OPTIONS)[number];
 
 /** Minimum characters for early leave reason on punch-out. */
 export const EARLY_LEAVE_REASON_MIN_LENGTH = 10;
@@ -48,7 +90,12 @@ export const WORKING_STATUS = {
   SHORT: "Short Hours",
   COMPLETED: "Completed",
   OVERTIME: "Overtime",
+  PENDING_REVIEW: "OT Approval Pending",
   IN_PROGRESS: "In Progress",
+  ABSENT: "Absent",
+  ON_LEAVE: "On Leave",
+  OVERTIME_APPROVED: "Overtime Approved",
+  OVERTIME_REQUESTED: "Overtime Requested",
 } as const;
 
 export type WorkingStatus = (typeof WORKING_STATUS)[keyof typeof WORKING_STATUS];

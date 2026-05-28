@@ -36,7 +36,7 @@ import {
     preserveHrOnlyFieldsOnUpdate,
 } from "@/lib/employee/list-access";
 import { withActiveSession } from "@/lib/auth/api-guard";
-import { canManageEmployees, canViewEmployeeSalary } from "@/lib/auth/server";
+import { canManageEmployees } from "@/lib/auth/server";
 import { prepareEmployeeCredentialsForSave } from "@/lib/auth/credentials-setup";
 import {
     applyPasswordToRowValues,
@@ -333,7 +333,7 @@ export const POST = withActiveSession(async (req) => {
  */
 export const PUT = withActiveSession(async (req, user) => {
     try {
-        const canViewSalary = canViewEmployeeSalary(user.role);
+        const canManage = canManageEmployees(user.role);
         const contentType = req.headers.get("content-type") ?? "";
         let range: string | undefined;
         let values: string[][];
@@ -359,7 +359,7 @@ export const PUT = withActiveSession(async (req, user) => {
                     : "";
 
             let rowValues = payload.values;
-            if (!canViewSalary && existingRow) {
+            if (!canManage && existingRow) {
                 rowValues = preserveHrOnlyFieldsOnUpdate(
                     headers,
                     rowValues,
@@ -441,7 +441,7 @@ export const PUT = withActiveSession(async (req, user) => {
                 const sheetData = await readSheet(EMPLOYEE_SHEET_RANGE);
                 const existingRow = sheetData[sheetRow - 1];
                 let rowValues = values[0] as string[];
-                if (!canViewSalary && existingRow) {
+                if (!canManage && existingRow) {
                     rowValues = preserveHrOnlyFieldsOnUpdate(
                         headers,
                         rowValues,

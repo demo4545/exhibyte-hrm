@@ -1,19 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ExternalLink, User } from "lucide-react";
+import { ExternalLink, Pencil, User } from "lucide-react";
 
 import { ROLES, STATUS } from "@/app/consts/common";
 import { parseSkillsValue } from "@/app/consts/tech-skills";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { normalizeDateValue } from "@/components/ui/date-input";
 import { ProfileAccountSettings } from "@/components/employee/profile-account-settings";
 import { useAuth } from "@/contexts/auth-provider";
-import { canViewEmployeeSalary } from "@/lib/auth/roles";
+import { canManageEmployees } from "@/lib/auth/roles";
 import {
   getDocumentDisplayName,
   getDocumentHref,
@@ -104,12 +105,14 @@ export type EmployeeProfileViewProps = {
   /** Show sign-in username and password settings (own profile only). */
   showAccountSettings?: boolean;
   hasPassword?: boolean;
+  onEdit?: () => void;
 };
 
 export function EmployeeProfileView({
   form,
   showAccountSettings = false,
   hasPassword: initialHasPassword = false,
+  onEdit,
 }: EmployeeProfileViewProps) {
   const { user } = useAuth();
   const profileSrc = resolveProfileImageSrc(form.profileImage);
@@ -117,7 +120,7 @@ export function EmployeeProfileView({
   const [hasPassword, setHasPassword] = useState(initialHasPassword);
   const showDocuments =
     user?.role === ROLES.HR_MANAGER || user?.role === ROLES.SUPER_ADMIN;
-  const showSalary = user ? canViewEmployeeSalary(user.role) : false;
+  const canManage = user ? canManageEmployees(user.role) : false;
   const isInactive = !isEmployeeStatusActive(form.status);
 
   useEffect(() => {
@@ -129,7 +132,15 @@ export function EmployeeProfileView({
       <div className="space-y-4 xl:col-span-2">
         <Card>
           <CardHeader>
-            <CardTitle>Core details</CardTitle>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle>Core details</CardTitle>
+              {onEdit ? (
+                <Button variant="outline" size="sm" type="button" onClick={onEdit}>
+                  <Pencil className="size-4" />
+                  Edit profile
+                </Button>
+              ) : null}
+            </div>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col items-center gap-3 sm:col-span-2">
@@ -158,15 +169,6 @@ export function EmployeeProfileView({
             <ReadOnlyField label="Contact" value={formatPhone(form.contactNumber)} />
             <ReadOnlyField label="Role" value={formatRole(form.role)} />
             <ReadOnlyField label="Position" value={formatPosition(form.position)} />
-            <div className="space-y-2">
-              <Label>Status</Label>
-              <div>
-                <Badge variant={form.status === STATUS.ACTIVE ? "success" : "danger"}>
-                  {form.status || "—"}
-                </Badge>
-              </div>
-            </div>
-            <ReadOnlyField label="Employee ID" value={form.employeeId || "—"} />
 
             {isInactive ? (
               <>
@@ -209,7 +211,7 @@ export function EmployeeProfileView({
               value={form.experience || "—"}
             />
 
-            {showSalary ? (
+            {canManage ? (
               <ReadOnlyField
                 label="Salary (monthly)"
                 value={form.salary?.trim() ? form.salary : "—"}
@@ -233,7 +235,7 @@ export function EmployeeProfileView({
       <div className="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle>Family & skills</CardTitle>
+            <CardTitle>Family</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <ReadOnlyField label="Parent / guardian" value={form.parentName || "—"} />
@@ -251,6 +253,15 @@ export function EmployeeProfileView({
                 className="disabled:opacity-100"
               />
             </div>
+
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Skills</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label>Tech skills</Label>
               <Textarea

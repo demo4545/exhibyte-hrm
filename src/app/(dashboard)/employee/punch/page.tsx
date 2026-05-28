@@ -8,16 +8,17 @@ import { EarlyLeaveDialog } from "@/components/attendance/early-leave-dialog";
 import { PunchDesk } from "@/components/attendance/punch-desk";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import { useTodayAttendance } from "@/hooks/use-today-attendance";
 import { useAuth } from "@/contexts/auth-provider";
 import { canManageEmployees } from "@/lib/auth/roles";
 import {
   fetchCorrectionRequests,
   reviewCorrection,
+  updateDailyUpdate,
   type CorrectionRequestDto,
 } from "@/lib/attendance/client";
-import { CORRECTION_STATUS } from "@/lib/attendance/constants";
-import { idealWorkingMs } from "@/lib/attendance/time";
+import { CORRECTION_STATUS, WORK_MODE, WORK_MODE_OPTIONS } from "@/lib/attendance/constants";
 
 export default function PunchPage() {
   const { user } = useAuth();
@@ -32,26 +33,51 @@ export default function PunchPage() {
   } | null>(null);
   const [earlyLeaveOpen, setEarlyLeaveOpen] = useState(false);
   const [earlyLeaveError, setEarlyLeaveError] = useState<string | null>(null);
+  const [dailyUpdateDraft, setDailyUpdateDraft] = useState<string | null>(null);
+  const [dailyUpdateSaving, setDailyUpdateSaving] = useState(false);
+  const [dailyUpdateError, setDailyUpdateError] = useState<string | null>(null);
+  const [workMode, setWorkMode] = useState<string>(WORK_MODE.FULL_DAY_ONSITE);
 
-  const shortfallMs = Math.max(0, idealWorkingMs() - liveWorkedMs);
+  const targetMs = (today?.idealHours ?? 8) * 60 * 60 * 1000;
+  const shortfallMs = Math.max(0, targetMs - liveWorkedMs);
   const isLeavingEarly = Boolean(today?.hasPunchedIn && !today?.hasPunchedOut && shortfallMs > 0);
 
   async function handlePunchOut() {
-    if (isLeavingEarly) {
-      setEarlyLeaveError(null);
-      setEarlyLeaveOpen(true);
-      return;
-    }
-    await runAction("punch-out");
+    setEarlyLeaveError(null);
+    setEarlyLeaveOpen(true);
   }
 
-  async function confirmEarlyLeave(reason: string) {
+  async function confirmEarlyLeave(payload: {
+    earlyLeaveReason?: string;
+    dailyUpdate: string;
+  }) {
     setEarlyLeaveError(null);
     try {
-      await runAction("punch-out", { earlyLeaveReason: reason });
+      await runAction("punch-out", payload);
+      setDailyUpdateDraft(null);
       setEarlyLeaveOpen(false);
     } catch (err) {
       setEarlyLeaveError(err instanceof Error ? err.message : "Punch out failed");
+    }
+  }
+
+  async function handleSaveDailyUpdate() {
+    if (!today?.date) return;
+    const value = (dailyUpdateDraft ?? today.dailyUpdate ?? "").trim();
+    if (!value) {
+      setDailyUpdateError("Daily update cannot be empty");
+      return;
+    }
+    setDailyUpdateSaving(true);
+    setDailyUpdateError(null);
+    try {
+      const updated = await updateDailyUpdate(today.date, value);
+      setDailyUpdateDraft(updated.dailyUpdate ?? null);
+      await refresh();
+    } catch (err) {
+      setDailyUpdateError(err instanceof Error ? err.message : "Failed to update daily update");
+    } finally {
+      setDailyUpdateSaving(false);
     }
   }
 
@@ -86,13 +112,37 @@ export default function PunchPage() {
         </p>
       ) : null}
 
+      {!today?.hasPunchedIn ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Work mode</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <Select
+              value={workMode}
+              onChange={(e) => setWorkMode(e.target.value)}
+              disabled={acting || loading}
+            >
+              {WORK_MODE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </Select>
+            <p className="text-xs text-ex-muted">
+              This mode will be saved in today&apos;s attendance row.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <PunchDesk
         userName={user?.name}
         today={today}
         loading={loading}
         acting={acting}
         liveWorkedMs={liveWorkedMs}
-        onPunchIn={() => void runAction("punch-in")}
+        onPunchIn={() => void runAction("punch-in", { workMode })}
         onPunchOut={() => void handlePunchOut()}
         onBreakStart={() => void runAction("break-start")}
         onBreakEnd={() => void runAction("break-end")}
@@ -102,11 +152,14 @@ export default function PunchPage() {
       />
 
       <EarlyLeaveDialog
+        key={`${today?.date ?? "today"}-${earlyLeaveOpen ? "open" : "closed"}`}
         open={earlyLeaveOpen}
         shortfallMs={shortfallMs}
+        requireEarlyLeaveReason={isLeavingEarly}
+        initialDailyUpdate={today?.dailyUpdate ?? ""}
         submitting={acting}
         error={earlyLeaveError}
-        onConfirm={(reason) => void confirmEarlyLeave(reason)}
+        onConfirm={(payload) => void confirmEarlyLeave(payload)}
         onCancel={() => {
           if (!acting) {
             setEarlyLeaveOpen(false);
@@ -114,6 +167,46 @@ export default function PunchPage() {
           }
         }}
       />
+
+      {today?.hasPunchedIn ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Daily update</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <textarea
+              value={dailyUpdateDraft ?? today?.dailyUpdate ?? ""}
+              onChange={(e) => setDailyUpdateDraft(e.target.value)}
+              placeholder="Add completed work for this day"
+              rows={4}
+              className="w-full rounded-md border border-ex-border bg-ex-elevated px-3 py-2 text-sm"
+              disabled={dailyUpdateSaving}
+            />
+            {dailyUpdateError ? (
+              <p className="text-sm text-red-600 dark:text-red-400">{dailyUpdateError}</p>
+            ) : null}
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                onClick={() => void handleSaveDailyUpdate()}
+                disabled={
+                  dailyUpdateSaving ||
+                  !(dailyUpdateDraft ?? today?.dailyUpdate ?? "").trim()
+                }
+              >
+                {dailyUpdateSaving ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" aria-hidden />
+                    Saving...
+                  </>
+                ) : (
+                  "Save update"
+                )}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {showCorrection && today?.hasPunchedIn ? (
         <CorrectionForm

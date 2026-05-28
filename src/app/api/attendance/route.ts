@@ -1,10 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 import {
   EARLY_LEAVE_REASON_MIN_LENGTH,
   IDEAL_BREAK_HOURS,
   IDEAL_SHIFT_HOURS,
   IDEAL_WORKING_HOURS,
+  WORK_MODE,
+  WORK_MODE_OPTIONS,
 } from "@/lib/attendance/constants";
 import {
   formatBreakAllowance,
@@ -17,10 +19,11 @@ import {
   endBreak,
   getMonthAttendance,
   getTodayAttendance,
-  listMonthlySheets,
+  listAttendanceMonthlySheetsAcrossYears,
   punchIn,
   punchOut,
   startBreak,
+  updateDailyUpdate,
 } from "@/lib/google/attendance-sheets";
 import {
   formatDuration,
@@ -52,7 +55,9 @@ export const GET = withActiveSession(async (req, user) => {
     const mode = searchParams.get("mode");
 
     if (mode === "periods") {
-      const sheets = await listMonthlySheets(employee.attendanceSpreadsheetId);
+      const sheets = await listAttendanceMonthlySheetsAcrossYears(
+        employee.attendanceSpreadsheetId,
+      );
       const years = new Set<number>();
       const monthsByYear = new Map<number, number[]>();
 
@@ -105,6 +110,7 @@ export const GET = withActiveSession(async (req, user) => {
         records: records.map((r) => ({
           id: r.date,
           date: r.date,
+          workMode: r.workMode,
           punchIn: r.punchIn,
           punchOut: r.punchOut,
           breakTime: r.totalBreakTime,
@@ -112,13 +118,16 @@ export const GET = withActiveSession(async (req, user) => {
           overtime: r.overtime,
           status: r.status,
           earlyLeaveReason: r.earlyLeaveReason,
+          dailyUpdate: r.dailyUpdate,
         })),
       });
     }
 
     const today = await getTodayAttendance(employee.attendanceSpreadsheetId);
     const workedMs = today ? computeLiveWorkedMs(today) : 0;
-    const idealMs = IDEAL_WORKING_HOURS * 60 * 60 * 1000;
+    const idealHours = today?.workMode === WORK_MODE.HALF_DAY_LEAVE ? 4 : IDEAL_WORKING_HOURS;
+    const idealBreakHours = today?.workMode === WORK_MODE.HALF_DAY_LEAVE ? 0 : IDEAL_BREAK_HOURS;
+    const idealMs = idealHours * 60 * 60 * 1000;
     const remainingMs = Math.max(0, idealMs - workedMs);
     const onBreak = Boolean(today?.breakStart?.trim() && !today?.breakEnd?.trim());
     let breakUsedMs = today ? parseDurationToMs(today.totalBreakTime) : 0;
@@ -136,6 +145,7 @@ export const GET = withActiveSession(async (req, user) => {
             date: today.date,
             punchIn: today.punchIn,
             punchOut: today.punchOut,
+            workMode: today.workMode,
             breakStart: today.breakStart,
             breakEnd: today.breakEnd,
             totalBreakTime: today.totalBreakTime,
@@ -148,13 +158,14 @@ export const GET = withActiveSession(async (req, user) => {
             workedMs,
             workedFormatted: formatDurationHms(workedMs),
             workedShort: formatDuration(workedMs),
-            idealHours: IDEAL_WORKING_HOURS,
-            idealBreakHours: IDEAL_BREAK_HOURS,
-            idealShiftHours: IDEAL_SHIFT_HOURS,
+            idealHours,
+            idealBreakHours,
+            idealShiftHours: idealHours + idealBreakHours,
             remainingMs,
             remainingFormatted: formatDuration(remainingMs),
             breakAllowanceFormatted: formatBreakAllowance(breakUsedMs),
             earlyLeaveReason: today.earlyLeaveReason ?? "",
+            dailyUpdate: today.dailyUpdate ?? "",
           }
         : null,
     });
@@ -178,6 +189,8 @@ export const POST = withActiveSession(async (req, user) => {
     const action = String(body.action ?? "");
     const earlyLeaveReason =
       typeof body.earlyLeaveReason === "string" ? body.earlyLeaveReason.trim() : "";
+    const dailyUpdate = typeof body.dailyUpdate === "string" ? body.dailyUpdate.trim() : "";
+    const workMode = typeof body.workMode === "string" ? body.workMode.trim() : "";
 
     if (action === "punch-out" && earlyLeaveReason.length > 0) {
       if (earlyLeaveReason.length < EARLY_LEAVE_REASON_MIN_LENGTH) {
@@ -190,15 +203,28 @@ export const POST = withActiveSession(async (req, user) => {
         );
       }
     }
+    if (action === "punch-out" && !dailyUpdate) {
+      return NextResponse.json(
+        { success: false, message: "Please share today's completed tasks before punch out" },
+        { status: 400 },
+      );
+    }
 
     let record;
     switch (action) {
       case "punch-in":
-        record = await punchIn(employee.attendanceSpreadsheetId);
+        if (!workMode || !WORK_MODE_OPTIONS.includes(workMode as (typeof WORK_MODE_OPTIONS)[number])) {
+          return NextResponse.json(
+            { success: false, message: "Please select a valid work mode before punch in" },
+            { status: 400 },
+          );
+        }
+        record = await punchIn(employee.attendanceSpreadsheetId, new Date(), { workMode });
         break;
       case "punch-out":
         record = await punchOut(employee.attendanceSpreadsheetId, new Date(), {
           earlyLeaveReason: earlyLeaveReason || undefined,
+          dailyUpdate,
         });
         break;
       case "break-start":
@@ -222,6 +248,7 @@ export const POST = withActiveSession(async (req, user) => {
         date: record.date,
         punchIn: record.punchIn,
         punchOut: record.punchOut,
+        workMode: record.workMode,
         breakStart: record.breakStart,
         breakEnd: record.breakEnd,
         totalBreakTime: record.totalBreakTime,
@@ -234,6 +261,11 @@ export const POST = withActiveSession(async (req, user) => {
         workedMs,
         workedFormatted: formatDurationHms(workedMs),
         earlyLeaveReason: record.earlyLeaveReason ?? "",
+        dailyUpdate: record.dailyUpdate ?? "",
+        idealHours: record.workMode === WORK_MODE.HALF_DAY_LEAVE ? 4 : IDEAL_WORKING_HOURS,
+        idealBreakHours: record.workMode === WORK_MODE.HALF_DAY_LEAVE ? 0 : IDEAL_BREAK_HOURS,
+        idealShiftHours:
+          record.workMode === WORK_MODE.HALF_DAY_LEAVE ? 4 : IDEAL_SHIFT_HOURS,
       },
     });
   } catch (error: unknown) {
@@ -242,9 +274,72 @@ export const POST = withActiveSession(async (req, user) => {
       message.includes("Already") ||
       message.includes("first") ||
       message.includes("break") ||
-      message.includes("reason")
+      message.includes("reason") ||
+      message.includes("tasks")
         ? 400
         : 500;
+    return NextResponse.json({ success: false, message }, { status });
+  }
+});
+
+export const PATCH = withActiveSession(async (req, user) => {
+  try {
+    const employee = await resolveAttendanceEmployeeForTarget(user, user.sheetRow);
+    if (!employee?.attendanceSpreadsheetId) {
+      return NextResponse.json(
+        { success: false, message: "Employee attendance record not found" },
+        { status: 404 },
+      );
+    }
+
+    const body = await req.json();
+    const date = typeof body.date === "string" ? body.date.trim() : "";
+    const dailyUpdate = typeof body.dailyUpdate === "string" ? body.dailyUpdate.trim() : "";
+    if (!date) {
+      return NextResponse.json(
+        { success: false, message: "Date is required for daily update" },
+        { status: 400 },
+      );
+    }
+    if (!dailyUpdate) {
+      return NextResponse.json(
+        { success: false, message: "Daily update cannot be empty" },
+        { status: 400 },
+      );
+    }
+
+    const record = await updateDailyUpdate(employee.attendanceSpreadsheetId, date, dailyUpdate);
+    const workedMs = computeLiveWorkedMs(record);
+
+    return NextResponse.json({
+      success: true,
+      record: {
+        date: record.date,
+        punchIn: record.punchIn,
+        punchOut: record.punchOut,
+        workMode: record.workMode,
+        breakStart: record.breakStart,
+        breakEnd: record.breakEnd,
+        totalBreakTime: record.totalBreakTime,
+        workingHours: record.workingHours,
+        overtime: record.overtime,
+        status: record.status,
+        onBreak: Boolean(record.breakStart?.trim() && !record.breakEnd?.trim()),
+        hasPunchedIn: Boolean(record.punchIn?.trim()),
+        hasPunchedOut: Boolean(record.punchOut?.trim()),
+        workedMs,
+        workedFormatted: formatDurationHms(workedMs),
+        earlyLeaveReason: record.earlyLeaveReason ?? "",
+        dailyUpdate: record.dailyUpdate ?? "",
+        idealHours: record.workMode === WORK_MODE.HALF_DAY_LEAVE ? 4 : IDEAL_WORKING_HOURS,
+        idealBreakHours: record.workMode === WORK_MODE.HALF_DAY_LEAVE ? 0 : IDEAL_BREAK_HOURS,
+        idealShiftHours:
+          record.workMode === WORK_MODE.HALF_DAY_LEAVE ? 4 : IDEAL_SHIFT_HOURS,
+      },
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to update daily update";
+    const status = message.includes("required") || message.includes("empty") ? 400 : 500;
     return NextResponse.json({ success: false, message }, { status });
   }
 });

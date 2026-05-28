@@ -62,6 +62,7 @@ export function useTodayAttendance() {
   const liveWorkedMs = today
     ? computeLiveWorkedMsFromFields({
         date: today.date,
+        workMode: today.workMode,
         punchIn: today.punchIn,
         punchOut: today.punchOut,
         totalBreakTime: today.totalBreakTime,
